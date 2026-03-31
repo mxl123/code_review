@@ -19,7 +19,7 @@ func main() {
 	}
 
 	glClient := gitlab.NewClient(cfg.GitLabURL, cfg.GitLabToken)
-	aiClient := openai.NewClient(cfg.OpenAIAPIKey, cfg.OpenAIModel)
+	aiClient := openai.NewClient(cfg.OpenAIAPIKey, cfg.OpenAIModel, cfg.OpenAIBaseURL)
 	rev := reviewer.New(glClient, aiClient, cfg.MaxDiffBytes)
 	handler := webhook.NewHandler(cfg.WebhookSecret, rev)
 

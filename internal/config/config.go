@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
@@ -11,12 +13,16 @@ type Config struct {
 	GitLabToken   string
 	WebhookSecret string
 	OpenAIAPIKey  string
+	OpenAIBaseURL string // 可选，用于对接 sub2api 等兼容平台；留空则使用 OpenAI 官方接口
 	OpenAIModel   string
 	ServerPort    string
 	MaxDiffBytes  int
 }
 
 func Load() (*Config, error) {
+	// 尝试加载 .env 文件，文件不存在时静默跳过，生产环境无影响
+	_ = godotenv.Load()
+
 	cfg := &Config{
 		OpenAIModel:  getEnvOrDefault("OPENAI_MODEL", "gpt-4o"),
 		ServerPort:   getEnvOrDefault("SERVER_PORT", "8080"),
@@ -35,6 +41,7 @@ func Load() (*Config, error) {
 	cfg.GitLabToken = os.Getenv("GITLAB_TOKEN")
 	cfg.WebhookSecret = os.Getenv("WEBHOOK_SECRET")
 	cfg.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
+	cfg.OpenAIBaseURL = os.Getenv("OPENAI_BASE_URL") // 可选
 
 	var missing []string
 	if cfg.GitLabURL == "" {

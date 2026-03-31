@@ -27,9 +27,15 @@ type Client struct {
 	model string
 }
 
-func NewClient(apiKey, model string) *Client {
+// NewClient 创建 OpenAI 客户端。
+// baseURL 为空时使用官方接口地址，非空时（如 sub2api）使用自定义地址。
+func NewClient(apiKey, model, baseURL string) *Client {
+	cfg := goopenai.DefaultConfig(apiKey)
+	if baseURL != "" {
+		cfg.BaseURL = baseURL
+	}
 	return &Client{
-		inner: goopenai.NewClient(apiKey),
+		inner: goopenai.NewClientWithConfig(cfg),
 		model: model,
 	}
 }
