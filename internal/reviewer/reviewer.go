@@ -25,8 +25,8 @@ func New(gl *gitlab.Client, ai *openai.Client, maxDiffBytes int) *Reviewer {
 	}
 }
 
-// Process fetches the MR diff, calls OpenAI for review, and posts the result as a comment.
-// Runs asynchronously; all errors are logged rather than returned.
+// Process 获取 MR diff，调用 OpenAI 进行审查，并将结果以评论形式发布到 MR。
+// 异步执行，所有错误只记录日志，不返回。
 func (r *Reviewer) Process(projectID, mrIID int) {
 	log.Printf("processing MR !%d in project %d", mrIID, projectID)
 
@@ -68,7 +68,7 @@ func (r *Reviewer) Process(projectID, mrIID int) {
 	}
 }
 
-// buildDiff formats changes into a single diff string, capping at maxBytes (per-file granularity).
+// buildDiff 将变更列表拼接成 diff 字符串，按文件粒度截断，总大小不超过 maxBytes。
 func buildDiff(changes []gitlab.Change, maxBytes int) (string, bool) {
 	var sb strings.Builder
 	truncated := false

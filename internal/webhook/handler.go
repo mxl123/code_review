@@ -54,7 +54,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MB limit
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 限制请求体最大 1MB，防止内存耗尽
 	if err != nil {
 		http.Error(w, "read error", http.StatusBadRequest)
 		return
@@ -76,7 +76,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	mrIID := event.ObjectAttributes.IID
 	log.Printf("received MR event: action=%s project=%d mr=%d", action, projectID, mrIID)
 
-	// Return 200 immediately; review runs in background to avoid GitLab webhook timeout
+	// 立即返回 200，审查在后台异步执行，避免 GitLab webhook 超时重试
 	w.WriteHeader(http.StatusOK)
 	go h.reviewer.Process(projectID, mrIID)
 }
