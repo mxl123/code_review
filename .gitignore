@@ -1,0 +1,11 @@
+# Binary (compiled output at repo root)
+/server
+
+# Environment files
+.env
+*.env
+
+# IDE
+.idea/
+.vscode/
+*.swp

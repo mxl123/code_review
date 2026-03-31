@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: code-review-config
+  namespace: default
+data:
+  GITLAB_URL: "https://gitlab.example.com"   # 替换为你的 GitLab 地址
+  OPENAI_MODEL: "gpt-4o"
+  SERVER_PORT: "8080"
+  MAX_DIFF_BYTES: "60000"

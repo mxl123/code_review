@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: code-review
+  namespace: default
+  labels:
+    app: code-review
+spec:
+  selector:
+    app: code-review
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP
+
+# 如果 GitLab 在集群外部，需要通过 Ingress 或 NodePort 暴露服务。
+# NodePort 示例（将 type 改为 NodePort）：
+# spec:
+#   type: NodePort
+#   ports:
+#     - port: 8080
+#       targetPort: 8080
+#       nodePort: 30808

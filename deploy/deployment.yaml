@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: code-review
+  namespace: default
+  labels:
+    app: code-review
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: code-review
+  template:
+    metadata:
+      labels:
+        app: code-review
+    spec:
+      containers:
+        - name: code-review
+          image: <your-registry>/code-review:latest   # 替换为你的私有镜像地址
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: code-review-config
+            - secretRef:
+                name: code-review-secret
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 3
+      imagePullSecrets:
+        - name: registry-secret   # 替换为你的私有镜像仓库凭证 Secret 名称
