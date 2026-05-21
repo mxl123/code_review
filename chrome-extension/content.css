@@ -1,55 +1,132 @@
+/* ---- 审查触发按钮 ---- */
 .cr-btn {
   margin-left: 8px;
-  padding: 6px 12px;
+  padding: 6px 14px;
   background: #1f75cb;
   color: #fff;
   border: none;
   border-radius: 4px;
   font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
   vertical-align: middle;
+  transition: background 0.15s;
 }
-.cr-btn:hover { background: #1a65b5; }
-.cr-btn:disabled { background: #aaa; cursor: not-allowed; }
+.cr-btn:hover    { background: #1a65b5; }
+.cr-btn:disabled { background: #9db5d8; cursor: not-allowed; }
 
+/* ---- 结果面板 ---- */
 #cr-result-panel {
-  margin: 16px 0;
+  margin: 16px 0 8px;
   border: 1px solid #d0d7de;
-  border-radius: 6px;
-  background: #f6f8fa;
-  font-size: 13px;
-  line-height: 1.6;
+  border-radius: 8px;
+  background: #ffffff;
+  font-size: 14px;
+  line-height: 1.7;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
 }
-#cr-result-panel.cr-panel-error { border-color: #f5c6cb; background: #fff5f5; }
+#cr-result-panel.cr-panel-error {
+  border-color: #f5c6cb;
+  background: #fff8f8;
+}
 
 .cr-panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 14px;
-  font-weight: 600;
+  padding: 10px 16px;
+  background: #f0f5ff;
   border-bottom: 1px solid #d0d7de;
-  background: #eaf0fb;
-  border-radius: 6px 6px 0 0;
+  border-radius: 8px 8px 0 0;
+  font-weight: 600;
+  font-size: 14px;
+  color: #1f2328;
 }
+.cr-panel-error .cr-panel-header {
+  background: #fff0f0;
+  border-color: #f5c6cb;
+}
+
 .cr-close {
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 14px;
-  color: #666;
-  padding: 0 4px;
+  font-size: 16px;
+  color: #57606a;
+  padding: 0 2px;
+  line-height: 1;
+  border-radius: 3px;
 }
-.cr-close:hover { color: #333; }
+.cr-close:hover { background: #e8eaed; color: #1f2328; }
 
-.cr-msg { padding: 12px 14px; color: #555; }
+.cr-msg {
+  padding: 14px 18px;
+  color: #57606a;
+}
 
-.cr-result {
-  padding: 14px;
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 13px;
-  color: #333;
+/* ---- Markdown 内容区 ---- */
+.cr-markdown {
+  padding: 18px 24px;
+  color: #1f2328;
+  overflow-x: auto;
+}
+
+.cr-markdown h1,
+.cr-markdown h2,
+.cr-markdown h3 {
+  margin: 20px 0 10px;
+  padding-bottom: 6px;
+  font-weight: 600;
+  line-height: 1.3;
+  border-bottom: 1px solid #e8eaed;
+  color: #1f2328;
+}
+.cr-markdown h1 { font-size: 1.4em; }
+.cr-markdown h2 { font-size: 1.2em; }
+.cr-markdown h3 { font-size: 1.05em; border-bottom: none; }
+
+.cr-markdown p  { margin: 8px 0; }
+.cr-markdown hr { border: none; border-top: 1px solid #e8eaed; margin: 16px 0; }
+
+.cr-markdown ul {
+  margin: 8px 0;
+  padding-left: 22px;
+}
+.cr-markdown li { margin: 4px 0; }
+
+.cr-markdown strong { font-weight: 600; color: #1f2328; }
+.cr-markdown em     { font-style: italic; }
+
+.cr-markdown a {
+  color: #0969da;
+  text-decoration: none;
+}
+.cr-markdown a:hover { text-decoration: underline; }
+
+/* 行内代码 */
+.cr-markdown code {
+  padding: 2px 5px;
+  background: #f0f2f4;
+  border-radius: 4px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.88em;
+  color: #c7254e;
+}
+
+/* 代码块 */
+.cr-markdown pre {
+  margin: 12px 0;
+  padding: 14px 16px;
+  background: #f6f8fa;
+  border: 1px solid #e8eaed;
+  border-radius: 6px;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+.cr-markdown pre code {
+  padding: 0;
+  background: none;
+  border-radius: 0;
+  font-size: 0.85em;
+  color: #1f2328;
 }

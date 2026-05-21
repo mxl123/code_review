@@ -133,15 +133,13 @@ function showPanel(content, isError, isMarkdown = false) {
 
   panel.className = 'cr-panel' + (isError ? ' cr-panel-error' : '');
 
+  const closeBtn = `<button class="cr-close" id="cr-close-btn">✕</button>`;
   if (isMarkdown) {
-    panel.innerHTML = `<div class="cr-panel-header">🤖 AI 代码审查结果 <button class="cr-close" onclick="this.closest('#cr-result-panel').remove()">✕</button></div><pre class="cr-result">${escapeHtml(content)}</pre>`;
+    panel.innerHTML = `<div class="cr-panel-header"><span>🤖 AI 代码审查结果</span>${closeBtn}</div><div class="cr-markdown">${renderMarkdown(content)}</div>`;
   } else {
-    panel.innerHTML = `<div class="cr-panel-header">🤖 AI 代码审查 <button class="cr-close" onclick="this.closest('#cr-result-panel').remove()">✕</button></div><div class="cr-msg">${escapeHtml(content)}</div>`;
+    panel.innerHTML = `<div class="cr-panel-header"><span>🤖 AI 代码审查</span>${closeBtn}</div><div class="cr-msg">${content}</div>`;
   }
-}
-
-function escapeHtml(str) {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  panel.querySelector('#cr-close-btn').addEventListener('click', () => panel.remove());
 }
 
 // 页面加载完成及单页应用路由变化时注入按钮
