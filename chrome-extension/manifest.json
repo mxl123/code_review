@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "GitLab Code Review",
+  "version": "1.0.0",
+  "description": "在 GitLab MR 页面触发 AI 代码审查",
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "GitLab Code Review"
+  }
+}

@@ -11,6 +11,7 @@ import (
 
 // ---- mock 实现 ----
 
+// mockGitLab 实现 gitlab.GitLabClient 接口（已移至 gitlab 包）。
 type mockGitLab struct {
 	changes         *gitlab.MRChanges
 	getMRChangesErr error

@@ -9,3 +9,5 @@ data:
   SERVER_PORT: "8080"
   MAX_DIFF_BYTES: "60000"
   # OPENAI_BASE_URL: "https://sub2api.example.com/v1"  # 可选：对接 sub2api 等 OpenAI 兼容平台时填写，留空使用 OpenAI 官方接口
+  # API_KEY: "your-random-key"                         # 可选：Chrome 插件调用 /api/* 时的鉴权 Key，内网部署可不填
+  # CORS_ORIGIN: "https://gitlab.example.com"          # 可选：允许的跨域来源，留空允许所有

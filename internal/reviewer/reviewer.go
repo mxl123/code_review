@@ -10,24 +10,18 @@ import (
 	"code-review/internal/gitlab"
 )
 
-// GitLabClient 定义 Reviewer 所需的 GitLab 操作，方便测试时注入 mock。
-type GitLabClient interface {
-	GetMRChanges(projectID, mrIID int) (*gitlab.MRChanges, error)
-	PostComment(projectID, mrIID int, body string) error
-}
-
 // AIClient 定义 Reviewer 所需的 AI 审查操作，方便测试时注入 mock。
 type AIClient interface {
 	Review(ctx context.Context, diff string) (string, error)
 }
 
 type Reviewer struct {
-	gitlab       GitLabClient
+	gitlab       gitlab.GitLabClient
 	openai       AIClient
 	maxDiffBytes int
 }
 
-func New(gl GitLabClient, ai AIClient, maxDiffBytes int) *Reviewer {
+func New(gl gitlab.GitLabClient, ai AIClient, maxDiffBytes int) *Reviewer {
 	return &Reviewer{
 		gitlab:       gl,
 		openai:       ai,
@@ -78,7 +72,38 @@ func (r *Reviewer) Process(projectID, mrIID int) {
 	}
 }
 
-// buildDiff 将变更列表拼接成 diff 字符串，按文件粒度截断，总大小不超过 maxBytes。
+// RunReview 获取 MR diff 并返回审查结果，不发布到 GitLab，供主动触发 API 使用。
+// gl 参数允许传入使用用户自己 token 的临时客户端。
+func (r *Reviewer) RunReview(gl gitlab.GitLabClient, projectID, mrIID int) (string, error) {
+	changes, err := gl.GetMRChanges(projectID, mrIID)
+	if err != nil {
+		return "", fmt.Errorf("获取 MR 变更失败: %w", err)
+	}
+
+	diff, truncated := buildDiff(changes.Changes, r.maxDiffBytes)
+	if strings.TrimSpace(diff) == "" {
+		return "", fmt.Errorf("没有可审查的代码变更（可能全是删除操作）")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	result, err := r.openai.Review(ctx, diff)
+	if err != nil {
+		return "", fmt.Errorf("AI 审查失败: %w", err)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## 自动代码审查\n\n")
+	if truncated {
+		sb.WriteString("> **注意：** 由于变更较大，仅展示部分文件的审查结果。\n\n")
+	}
+	sb.WriteString(result)
+	sb.WriteString("\n\n---\n*本审查由 AI 自动生成，请结合实际情况判断。*")
+	return sb.String(), nil
+}
+
+
 func buildDiff(changes []gitlab.Change, maxBytes int) (string, bool) {
 	var sb strings.Builder
 	truncated := false

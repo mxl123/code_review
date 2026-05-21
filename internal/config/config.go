@@ -17,6 +17,8 @@ type Config struct {
 	OpenAIModel   string
 	ServerPort    string
 	MaxDiffBytes  int
+	APIKey        string // 可选，Chrome 插件调用 /api/* 时携带的鉴权 Key；为空则不校验
+	CORSOrigin    string // 可选，允许的跨域来源，如 https://gitlab.example.com；为空则允许所有
 }
 
 func Load() (*Config, error) {
@@ -42,6 +44,8 @@ func Load() (*Config, error) {
 	cfg.WebhookSecret = os.Getenv("WEBHOOK_SECRET")
 	cfg.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
 	cfg.OpenAIBaseURL = os.Getenv("OPENAI_BASE_URL") // 可选
+	cfg.APIKey = os.Getenv("API_KEY")                // 可选
+	cfg.CORSOrigin = os.Getenv("CORS_ORIGIN")        // 可选
 
 	var missing []string
 	if cfg.GitLabURL == "" {

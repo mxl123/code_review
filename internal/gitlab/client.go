@@ -11,6 +11,12 @@ import (
 	"time"
 )
 
+// GitLabClient 定义与 GitLab API 交互所需的操作，方便测试时注入 mock。
+type GitLabClient interface {
+	GetMRChanges(projectID, mrIID int) (*MRChanges, error)
+	PostComment(projectID, mrIID int, body string) error
+}
+
 type Client struct {
 	baseURL    string
 	token      string
