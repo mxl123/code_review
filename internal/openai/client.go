@@ -1,8 +1,13 @@
 package openai
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"strings"
 
 	goopenai "github.com/sashabaranov/go-openai"
 )
@@ -22,6 +27,34 @@ const systemPrompt = `你是一位资深软件工程师，正在对 Merge Reques
 - 如果整体代码质量良好，在末尾简短说明
 - **所有内容必须使用中文输出**`
 
+// debugTransport 在响应不是 JSON 时记录原始响应体，帮助排查 URL 配置问题。
+type debugTransport struct {
+	inner http.RoundTripper
+}
+
+func (t *debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.inner.RoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "json") {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		// 截断到 500 字节避免日志过长
+		preview := string(body)
+		if len(preview) > 500 {
+			preview = preview[:500] + "...(truncated)"
+		}
+		log.Printf("WARN sub2api returned non-JSON response: status=%s content-type=%q url=%s body=%s",
+			resp.Status, ct, req.URL, preview)
+		// 还原 body，让 go-openai 继续读取（会报 JSON 解析错误，但日志里已有原始内容）
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+	}
+	return resp, nil
+}
+
 type Client struct {
 	inner *goopenai.Client
 	model string
@@ -33,6 +66,9 @@ func NewClient(apiKey, model, baseURL string) *Client {
 	cfg := goopenai.DefaultConfig(apiKey)
 	if baseURL != "" {
 		cfg.BaseURL = baseURL
+	}
+	cfg.HTTPClient = &http.Client{
+		Transport: &debugTransport{inner: http.DefaultTransport},
 	}
 	return &Client{
 		inner: goopenai.NewClientWithConfig(cfg),
@@ -46,7 +82,7 @@ func (c *Client) Review(ctx context.Context, diff string) (string, error) {
 		Temperature: 0.2,
 		Messages: []goopenai.ChatCompletionMessage{
 			{Role: goopenai.ChatMessageRoleSystem, Content: systemPrompt},
-			{Role: goopenai.ChatMessageRoleUser, Content: "Please review the following code diff from a merge request:\n\n" + diff},
+			{Role: goopenai.ChatMessageRoleUser, Content: "请审查以下 Merge Request 的代码变更：\n\n" + diff},
 		},
 	})
 	if err != nil {
