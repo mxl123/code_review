@@ -55,7 +55,8 @@ function bgFetch(url, method = 'GET', headers = {}, body) {
 }
 
 async function startReview({ projectId, mrIID }) {
-  const cfg = await chrome.storage.sync.get(['serviceUrl', 'apiKey', 'gitlabToken']);
+  const data = await chrome.storage.sync.get(['serviceUrl', 'apiKey', 'gitlabToken']);
+  const cfg = { ...data, serviceUrl: data.serviceUrl || 'http://10.20.21.119:8082' };
 
   if (!cfg.serviceUrl) {
     showPanel('⚠️ 请先在插件设置中配置审查服务地址。', true);
