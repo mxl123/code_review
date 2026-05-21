@@ -40,7 +40,8 @@ func (t *debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	ct := resp.Header.Get("Content-Type")
-	if !strings.Contains(ct, "json") {
+	// event-stream 是正常的流式响应，跳过 body 读取，否则会将整个流缓存到内存，破坏逐 token 推送
+	if !strings.Contains(ct, "json") && !strings.Contains(ct, "event-stream") {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		// 截断到 500 字节避免日志过长
