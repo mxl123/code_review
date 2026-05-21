@@ -142,6 +142,10 @@ func (h *Handler) setCORS(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", origin)
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key")
+	// Chrome Private Network Access 策略：公网页面访问 localhost 时需要此头
+	if r.Header.Get("Access-Control-Request-Private-Network") == "true" {
+		w.Header().Set("Access-Control-Allow-Private-Network", "true")
+	}
 }
 
 func (h *Handler) checkAPIKey(w http.ResponseWriter, r *http.Request) bool {
