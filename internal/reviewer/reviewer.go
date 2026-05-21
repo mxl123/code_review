@@ -8,16 +8,26 @@ import (
 	"time"
 
 	"code-review/internal/gitlab"
-	"code-review/internal/openai"
 )
 
+// GitLabClient 定义 Reviewer 所需的 GitLab 操作，方便测试时注入 mock。
+type GitLabClient interface {
+	GetMRChanges(projectID, mrIID int) (*gitlab.MRChanges, error)
+	PostComment(projectID, mrIID int, body string) error
+}
+
+// AIClient 定义 Reviewer 所需的 AI 审查操作，方便测试时注入 mock。
+type AIClient interface {
+	Review(ctx context.Context, diff string) (string, error)
+}
+
 type Reviewer struct {
-	gitlab       *gitlab.Client
-	openai       *openai.Client
+	gitlab       GitLabClient
+	openai       AIClient
 	maxDiffBytes int
 }
 
-func New(gl *gitlab.Client, ai *openai.Client, maxDiffBytes int) *Reviewer {
+func New(gl GitLabClient, ai AIClient, maxDiffBytes int) *Reviewer {
 	return &Reviewer{
 		gitlab:       gl,
 		openai:       ai,

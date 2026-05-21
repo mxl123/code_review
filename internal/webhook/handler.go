@@ -6,9 +6,12 @@ import (
 	"io"
 	"log"
 	"net/http"
-
-	"code-review/internal/reviewer"
 )
+
+// Processor 异步处理 MR 审查，方便测试时注入 mock。
+type Processor interface {
+	Process(projectID, mrIID int)
+}
 
 type mrEvent struct {
 	ObjectKind       string       `json:"object_kind"`
@@ -26,11 +29,11 @@ type projectInfo struct {
 }
 
 type Handler struct {
-	secret   []byte
-	reviewer *reviewer.Reviewer
+	secret    []byte
+	reviewer  Processor
 }
 
-func NewHandler(secret string, r *reviewer.Reviewer) *Handler {
+func NewHandler(secret string, r Processor) *Handler {
 	return &Handler{
 		secret:   []byte(secret),
 		reviewer: r,
