@@ -13,6 +13,7 @@ import (
 // AIClient 定义 Reviewer 所需的 AI 审查操作，方便测试时注入 mock。
 type AIClient interface {
 	Review(ctx context.Context, diff string) (string, error)
+	ReviewStream(ctx context.Context, diff string, onToken func(string)) error
 }
 
 type Reviewer struct {
@@ -104,6 +105,29 @@ func (r *Reviewer) RunReview(gl gitlab.GitLabClient, projectID, mrIID int) (stri
 }
 
 
+// RunReviewStream 流式执行审查，每收到一个 token 就调用 onToken，供 SSE 接口使用。
+func (r *Reviewer) RunReviewStream(gl gitlab.GitLabClient, projectID, mrIID int, onToken func(string)) error {
+	changes, err := gl.GetMRChanges(projectID, mrIID)
+	if err != nil {
+		return fmt.Errorf("获取 MR 变更失败: %w", err)
+	}
+
+	diff, truncated := buildDiff(changes.Changes, r.maxDiffBytes)
+	if strings.TrimSpace(diff) == "" {
+		return fmt.Errorf("没有可审查的代码变更（可能全是删除操作）")
+	}
+
+	if truncated {
+		onToken("> **注意：** 由于变更较大，仅展示部分文件的审查结果。\n\n")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	return r.openai.ReviewStream(ctx, diff, onToken)
+}
+
+// buildDiff 将变更列表拼接成 diff 字符串，按文件粒度截断，总大小不超过 maxBytes。
 func buildDiff(changes []gitlab.Change, maxBytes int) (string, bool) {
 	var sb strings.Builder
 	truncated := false

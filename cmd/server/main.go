@@ -41,7 +41,7 @@ func main() {
 		Addr:         ":" + cfg.ServerPort,
 		Handler:      mux,
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		WriteTimeout: 180 * time.Second, // SSE 流式连接可能持续数分钟
 		IdleTimeout:  60 * time.Second,
 	}
 

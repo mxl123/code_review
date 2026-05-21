@@ -33,8 +33,6 @@ function injectButton() {
 }
 
 // bgFetch 通过 background service worker 发起请求，绕过 PNA 限制。
-// content script 继承页面（HTTP）上下文，无法直接访问 localhost；
-// background service worker 运行在扩展特权上下文，不受此限制。
 function bgFetch(url, method = 'GET', headers = {}, body) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(
@@ -54,6 +52,27 @@ function bgFetch(url, method = 'GET', headers = {}, body) {
   });
 }
 
+// bgStream 通过 background service worker 发起 SSE 流式请求。
+// 返回 Promise<void>，流事件通过 chrome.runtime.onMessage 推送回来。
+function bgStream(url, headers = {}, body) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      { type: 'STREAM', url, headers, body },
+      (resp) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        if (!resp.ok) {
+          reject(new Error(resp.error || '流式请求初始化失败'));
+          return;
+        }
+        resolve();
+      }
+    );
+  });
+}
+
 async function startReview({ projectId, mrIID }) {
   const data = await chrome.storage.sync.get(['serviceUrl', 'apiKey', 'gitlabToken']);
   const cfg = { ...data, serviceUrl: data.serviceUrl || 'http://10.20.21.119:8082' };
@@ -65,56 +84,49 @@ async function startReview({ projectId, mrIID }) {
 
   const btn = document.getElementById('cr-review-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ 审查中...'; }
-  showPanel('正在提交审查请求，请稍候...', false);
+  showPanel('正在连接审查服务，请稍候...', false);
 
-  try {
-    const headers = { 'Content-Type': 'application/json' };
-    if (cfg.apiKey) headers['X-API-Key'] = cfg.apiKey;
-
-    const raw = await bgFetch(
-      `${cfg.serviceUrl}/api/review`,
-      'POST',
-      headers,
-      JSON.stringify({
-        project_id: projectId,
-        mr_iid: mrIID,
-        gitlab_token: cfg.gitlabToken || undefined,
-      })
-    );
-
-    const { job_id } = JSON.parse(raw);
-    showPanel('AI 正在审查代码，通常需要 20-60 秒...', false);
-    pollResult(cfg, job_id);
-  } catch (e) {
-    showPanel(`❌ 触发失败：${e.message}`, true);
-    resetBtn();
-  }
-}
-
-async function pollResult(cfg, jobId) {
-  const headers = {};
+  const headers = { 'Content-Type': 'application/json' };
   if (cfg.apiKey) headers['X-API-Key'] = cfg.apiKey;
 
-  const poll = async () => {
-    try {
-      const raw = await bgFetch(`${cfg.serviceUrl}/api/review/${jobId}`, 'GET', headers);
-      const data = JSON.parse(raw);
+  const body = JSON.stringify({
+    project_id: projectId,
+    mr_iid: mrIID,
+    gitlab_token: cfg.gitlabToken || undefined,
+  });
 
-      if (data.status === 'done') {
-        showPanel(data.result, false, true);
-        resetBtn();
-      } else if (data.status === 'failed') {
-        showPanel(`❌ 审查失败：${data.error}`, true);
-        resetBtn();
-      } else {
-        setTimeout(poll, 2000); // pending，继续轮询
+  // 注册流式消息监听器（在发起请求前注册，避免遗漏首批 chunk）
+  let streamBuf = '';
+  let firstChunk = true;
+
+  const onStreamMsg = (msg) => {
+    if (msg.type === 'STREAM_CHUNK') {
+      if (firstChunk) {
+        firstChunk = false;
+        showStreamPanel(); // 首个 token 到达时切换到流式展示面板
       }
-    } catch (e) {
-      showPanel(`❌ 查询失败：${e.message}`, true);
+      streamBuf += msg.chunk;
+      updateStreamPanel(streamBuf);
+    } else if (msg.type === 'STREAM_END') {
+      chrome.runtime.onMessage.removeListener(onStreamMsg);
+      finalizeStreamPanel(streamBuf);
+      resetBtn();
+    } else if (msg.type === 'STREAM_ERROR') {
+      chrome.runtime.onMessage.removeListener(onStreamMsg);
+      showPanel(`❌ 审查失败：${msg.error}`, true);
       resetBtn();
     }
   };
-  setTimeout(poll, 2000);
+  chrome.runtime.onMessage.addListener(onStreamMsg);
+
+  try {
+    await bgStream(`${cfg.serviceUrl}/api/review/stream`, headers, body);
+    // bgStream resolve 仅代表请求已发出，实际数据通过 onStreamMsg 接收
+  } catch (e) {
+    chrome.runtime.onMessage.removeListener(onStreamMsg);
+    showPanel(`❌ 触发失败：${e.message}`, true);
+    resetBtn();
+  }
 }
 
 function resetBtn() {
@@ -122,7 +134,29 @@ function resetBtn() {
   if (btn) { btn.disabled = false; btn.textContent = '🤖 AI 代码审查'; }
 }
 
-function showPanel(content, isError, isMarkdown = false) {
+// showStreamPanel 创建用于流式输出的面板（显示加载中状态）
+function showStreamPanel() {
+  let panel = getOrCreatePanel();
+  panel.className = 'cr-panel';
+  panel.innerHTML =
+    `<div class="cr-panel-header"><span>🤖 AI 代码审查结果</span><button class="cr-close" id="cr-close-btn">✕</button></div>` +
+    `<div class="cr-markdown" id="cr-stream-content"></div>`;
+  panel.querySelector('#cr-close-btn').addEventListener('click', () => panel.remove());
+}
+
+// updateStreamPanel 在流式输出过程中实时渲染已接收内容
+function updateStreamPanel(text) {
+  const el = document.getElementById('cr-stream-content');
+  if (el) el.innerHTML = renderMarkdown(text) + '<span class="cr-cursor">▌</span>';
+}
+
+// finalizeStreamPanel 流结束时移除光标，完成渲染
+function finalizeStreamPanel(text) {
+  const el = document.getElementById('cr-stream-content');
+  if (el) el.innerHTML = renderMarkdown(text);
+}
+
+function getOrCreatePanel() {
   let panel = document.getElementById('cr-result-panel');
   if (!panel) {
     panel = document.createElement('div');
@@ -131,7 +165,11 @@ function showPanel(content, isError, isMarkdown = false) {
     if (container) container.prepend(panel);
     else document.body.prepend(panel);
   }
+  return panel;
+}
 
+function showPanel(content, isError, isMarkdown = false) {
+  const panel = getOrCreatePanel();
   panel.className = 'cr-panel' + (isError ? ' cr-panel-error' : '');
 
   const closeBtn = `<button class="cr-close" id="cr-close-btn">✕</button>`;

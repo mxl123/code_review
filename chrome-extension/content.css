@@ -130,3 +130,15 @@
   font-size: 0.85em;
   color: #1f2328;
 }
+
+/* 流式输出光标动画 */
+.cr-cursor {
+  display: inline-block;
+  animation: cr-blink 0.8s step-end infinite;
+  color: #1f75cb;
+  font-weight: 300;
+}
+@keyframes cr-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}

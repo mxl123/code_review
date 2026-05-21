@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -13,9 +14,8 @@ import (
 // Runner 是 reviewer.Reviewer 的接口抽象，方便测试。
 type Runner interface {
 	RunReview(gl gitlab.GitLabClient, projectID, mrIID int) (string, error)
+	RunReviewStream(gl gitlab.GitLabClient, projectID, mrIID int, onToken func(string)) error
 }
-
-// 确保接口对齐，Runner 中的 GitLabClient 即 gitlab.GitLabClient。
 
 type Handler struct {
 	runner      Runner
@@ -48,14 +48,20 @@ func (h *Handler) HandleReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 根据路径区分：/api/review 触发，/api/review/{job_id} 查询
-	jobID := strings.TrimPrefix(r.URL.Path, "/api/review")
-	jobID = strings.TrimPrefix(jobID, "/")
+	// 路径分发：
+	//   /api/review          → 触发审查（轮询模式）
+	//   /api/review/stream   → 触发审查（SSE 流式模式）
+	//   /api/review/{job_id} → 查询轮询结果
+	suffix := strings.TrimPrefix(r.URL.Path, "/api/review")
+	suffix = strings.TrimPrefix(suffix, "/")
 
-	if jobID == "" {
+	switch suffix {
+	case "":
 		h.triggerReview(w, r)
-	} else {
-		h.getResult(w, r, jobID)
+	case "stream":
+		h.triggerStream(w, r)
+	default:
+		h.getResult(w, r, suffix)
 	}
 }
 
@@ -168,4 +174,61 @@ func jsonError(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// triggerStream 处理 POST /api/review/stream，以 SSE 流式返回审查结果。
+func (h *Handler) triggerStream(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req triggerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if req.ProjectID == 0 || req.MRIID == 0 {
+		http.Error(w, "project_id 和 mr_iid 不能为空", http.StatusBadRequest)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	h.setCORS(w, r)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no") // 关闭 nginx 缓冲，确保实时推送
+
+	token := req.GitLabToken
+	if token == "" {
+		token = h.gitlabToken
+	}
+	gl := gitlab.NewClient(h.gitlabURL, token)
+
+	log.Printf("api: 流式审查开始 project=%d mr=%d", req.ProjectID, req.MRIID)
+
+	err := h.runner.RunReviewStream(gl, req.ProjectID, req.MRIID, func(chunk string) {
+		sendSSE(w, flusher, "token", chunk)
+	})
+
+	if err != nil {
+		log.Printf("api: 流式审查失败 project=%d mr=%d: %v", req.ProjectID, req.MRIID, err)
+		sendSSE(w, flusher, "error", err.Error())
+		return
+	}
+
+	log.Printf("api: 流式审查完成 project=%d mr=%d", req.ProjectID, req.MRIID)
+	sendSSE(w, flusher, "done", "")
+}
+
+// sendSSE 向客户端发送一个 SSE 事件并立即 flush。
+func sendSSE(w http.ResponseWriter, f http.Flusher, event, data string) {
+	payload, _ := json.Marshal(data)
+	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, payload)
+	f.Flush()
 }

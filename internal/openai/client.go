@@ -3,6 +3,7 @@ package openai
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -76,14 +77,18 @@ func NewClient(apiKey, model, baseURL string) *Client {
 	}
 }
 
+func (c *Client) messages(diff string) []goopenai.ChatCompletionMessage {
+	return []goopenai.ChatCompletionMessage{
+		{Role: goopenai.ChatMessageRoleSystem, Content: systemPrompt},
+		{Role: goopenai.ChatMessageRoleUser, Content: "请审查以下 Merge Request 的代码变更：\n\n" + diff},
+	}
+}
+
 func (c *Client) Review(ctx context.Context, diff string) (string, error) {
 	resp, err := c.inner.CreateChatCompletion(ctx, goopenai.ChatCompletionRequest{
 		Model:       c.model,
 		Temperature: 0.2,
-		Messages: []goopenai.ChatCompletionMessage{
-			{Role: goopenai.ChatMessageRoleSystem, Content: systemPrompt},
-			{Role: goopenai.ChatMessageRoleUser, Content: "请审查以下 Merge Request 的代码变更：\n\n" + diff},
-		},
+		Messages:    c.messages(diff),
 	})
 	if err != nil {
 		return "", fmt.Errorf("openai chat completion: %w", err)
@@ -92,4 +97,33 @@ func (c *Client) Review(ctx context.Context, diff string) (string, error) {
 		return "", fmt.Errorf("openai returned no choices")
 	}
 	return resp.Choices[0].Message.Content, nil
+}
+
+// ReviewStream 以流式方式获取审查结果，每收到一个 token 就调用 onToken 回调。
+func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(string)) error {
+	stream, err := c.inner.CreateChatCompletionStream(ctx, goopenai.ChatCompletionRequest{
+		Model:       c.model,
+		Temperature: 0.2,
+		Stream:      true,
+		Messages:    c.messages(diff),
+	})
+	if err != nil {
+		return fmt.Errorf("openai stream: %w", err)
+	}
+	defer stream.Close()
+
+	for {
+		resp, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("stream recv: %w", err)
+		}
+		if len(resp.Choices) > 0 {
+			if token := resp.Choices[0].Delta.Content; token != "" {
+				onToken(token)
+			}
+		}
+	}
 }
