@@ -1,10 +1,14 @@
 const $ = id => document.getElementById(id);
 
-// 加载已保存的配置
+const DEFAULTS = {
+  serviceUrl: 'http://10.20.21.119:8082',
+};
+
+// 加载已保存的配置，未设置时使用默认值
 chrome.storage.sync.get(['serviceUrl', 'apiKey', 'gitlabToken'], (data) => {
-  if (data.serviceUrl)   $('serviceUrl').value   = data.serviceUrl;
-  if (data.apiKey)       $('apiKey').value       = data.apiKey;
-  if (data.gitlabToken)  $('gitlabToken').value  = data.gitlabToken;
+  $('serviceUrl').value  = data.serviceUrl  || DEFAULTS.serviceUrl;
+  if (data.apiKey)       $('apiKey').value      = data.apiKey;
+  if (data.gitlabToken)  $('gitlabToken').value = data.gitlabToken;
 });
 
 $('save').addEventListener('click', () => {
