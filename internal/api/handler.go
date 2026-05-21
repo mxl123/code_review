@@ -212,7 +212,9 @@ func (h *Handler) triggerStream(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("api: 流式审查开始 project=%d mr=%d", req.ProjectID, req.MRIID)
 
+	var resultBuf strings.Builder
 	err := h.runner.RunReviewStream(gl, req.ProjectID, req.MRIID, func(chunk string) {
+		resultBuf.WriteString(chunk)
 		sendSSE(w, flusher, "token", chunk)
 	})
 
@@ -222,7 +224,7 @@ func (h *Handler) triggerStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("api: 流式审查完成 project=%d mr=%d", req.ProjectID, req.MRIID)
+	log.Printf("api: 流式审查完成 project=%d mr=%d\n审查结果:\n%s", req.ProjectID, req.MRIID, resultBuf.String())
 	sendSSE(w, flusher, "done", "")
 }
 
