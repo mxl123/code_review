@@ -32,6 +32,28 @@ function injectButton() {
   titleArea.appendChild(btn);
 }
 
+// bgFetch 通过 background service worker 发起请求，绕过 PNA 限制。
+// content script 继承页面（HTTP）上下文，无法直接访问 localhost；
+// background service worker 运行在扩展特权上下文，不受此限制。
+function bgFetch(url, method = 'GET', headers = {}, body) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      { type: 'FETCH', url, method, headers, body },
+      (resp) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        if (!resp.ok) {
+          reject(new Error(resp.error || `请求失败 (${resp.status})`));
+          return;
+        }
+        resolve(resp.body);
+      }
+    );
+  });
+}
+
 async function startReview({ projectId, mrIID }) {
   const cfg = await chrome.storage.sync.get(['serviceUrl', 'apiKey', 'gitlabToken']);
 
@@ -48,22 +70,18 @@ async function startReview({ projectId, mrIID }) {
     const headers = { 'Content-Type': 'application/json' };
     if (cfg.apiKey) headers['X-API-Key'] = cfg.apiKey;
 
-    const triggerResp = await fetch(`${cfg.serviceUrl}/api/review`, {
-      method: 'POST',
+    const raw = await bgFetch(
+      `${cfg.serviceUrl}/api/review`,
+      'POST',
       headers,
-      body: JSON.stringify({
+      JSON.stringify({
         project_id: projectId,
         mr_iid: mrIID,
         gitlab_token: cfg.gitlabToken || undefined,
-      }),
-    });
+      })
+    );
 
-    if (!triggerResp.ok) {
-      const err = await triggerResp.json().catch(() => ({}));
-      throw new Error(err.error || `请求失败 (${triggerResp.status})`);
-    }
-
-    const { job_id } = await triggerResp.json();
+    const { job_id } = JSON.parse(raw);
     showPanel('AI 正在审查代码，通常需要 20-60 秒...', false);
     pollResult(cfg, job_id);
   } catch (e) {
@@ -78,8 +96,8 @@ async function pollResult(cfg, jobId) {
 
   const poll = async () => {
     try {
-      const resp = await fetch(`${cfg.serviceUrl}/api/review/${jobId}`, { headers });
-      const data = await resp.json();
+      const raw = await bgFetch(`${cfg.serviceUrl}/api/review/${jobId}`, 'GET', headers);
+      const data = JSON.parse(raw);
 
       if (data.status === 'done') {
         showPanel(data.result, false, true);
@@ -88,7 +106,7 @@ async function pollResult(cfg, jobId) {
         showPanel(`❌ 审查失败：${data.error}`, true);
         resetBtn();
       } else {
-        setTimeout(poll, 2000); // 继续轮询
+        setTimeout(poll, 2000); // pending，继续轮询
       }
     } catch (e) {
       showPanel(`❌ 查询失败：${e.message}`, true);
@@ -108,7 +126,6 @@ function showPanel(content, isError, isMarkdown = false) {
   if (!panel) {
     panel = document.createElement('div');
     panel.id = 'cr-result-panel';
-    // 插入到 MR 内容区顶部
     const container = document.querySelector('.content-wrapper main, .main-content, #content-body');
     if (container) container.prepend(panel);
     else document.body.prepend(panel);
@@ -117,7 +134,6 @@ function showPanel(content, isError, isMarkdown = false) {
   panel.className = 'cr-panel' + (isError ? ' cr-panel-error' : '');
 
   if (isMarkdown) {
-    // 简单 markdown 渲染：将结果放入 pre 标签保留格式
     panel.innerHTML = `<div class="cr-panel-header">🤖 AI 代码审查结果 <button class="cr-close" onclick="this.closest('#cr-result-panel').remove()">✕</button></div><pre class="cr-result">${escapeHtml(content)}</pre>`;
   } else {
     panel.innerHTML = `<div class="cr-panel-header">🤖 AI 代码审查 <button class="cr-close" onclick="this.closest('#cr-result-panel').remove()">✕</button></div><div class="cr-msg">${escapeHtml(content)}</div>`;
