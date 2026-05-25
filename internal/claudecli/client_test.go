@@ -40,7 +40,7 @@ func writeFakePromptFile(t *testing.T) string {
 // newTestClient 创建带假 claude 脚本和假提示词文件的 Client。
 func newTestClient(t *testing.T, output string, exitCode int) *Client {
 	t.Helper()
-	return NewClient(writeFakeClaudeScript(t, output, exitCode), "", writeFakePromptFile(t))
+	return NewClient(writeFakeClaudeScript(t, output, exitCode), "", writeFakePromptFile(t), "")
 }
 
 // ---- Review 测试 ----

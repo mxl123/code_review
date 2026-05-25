@@ -18,33 +18,51 @@ import (
 type Client struct {
 	binPath          string // claude 二进制路径，默认 "claude"
 	model            string // 可选；为空时不传 --model
-	systemPromptFile string // 审查规则文件路径
+	systemPromptFile string // 提示词文件模式：规则文件路径
+	skill            string // 技能模式：~/.claude/commands/ 中的 skill 名称（不含 /）
 }
 
-func NewClient(binPath, model, systemPromptFile string) *Client {
+func NewClient(binPath, model, systemPromptFile, skill string) *Client {
 	if binPath == "" {
 		binPath = "claude"
 	}
-	if systemPromptFile == "" {
-		systemPromptFile = "prompts/review-system-prompt.md"
+	return &Client{
+		binPath:          binPath,
+		model:            model,
+		systemPromptFile: systemPromptFile,
+		skill:            skill,
 	}
-	return &Client{binPath: binPath, model: model, systemPromptFile: systemPromptFile}
 }
 
-// newCmd 构造隔离的 exec.Cmd：
-//   - --system-prompt-file 替换全局 CLAUDE.md，屏蔽本机 skill/rule 干扰
-//   - Dir=/tmp 避免捡到项目级 CLAUDE.md
-func (c *Client) newCmd(ctx context.Context, outputFormat, userPrompt string) (*exec.Cmd, error) {
-	// 验证规则文件存在，给出明确报错
-	if _, err := os.Stat(c.systemPromptFile); err != nil {
-		return nil, fmt.Errorf("审查规则文件不存在 %q: %w", c.systemPromptFile, err)
+// newCmd 根据配置构造子进程：
+//
+//   - 技能模式（CLAUDE_SKILL 已设置）：
+//     prompt = "/<skill>\n\n<diff>"，不使用 --system-prompt-file，
+//     由 skill 定义审查逻辑，工作目录设为 /tmp 避免捡到项目 CLAUDE.md。
+//
+//   - 提示词文件模式（默认）：
+//     使用 --system-prompt-file 完全替换 CLAUDE.md，完全隔离本机配置。
+func (c *Client) newCmd(ctx context.Context, outputFormat, diff string) (*exec.Cmd, error) {
+	var p string
+	var extraArgs []string
+
+	if c.skill != "" {
+		// 技能模式：把 diff 作为 skill 的输入追加在斜杠命令之后
+		p = "/" + c.skill + "\n\n" + prompt.UserPromptPrefix + diff
+	} else {
+		// 提示词文件模式：验证文件存在后加 --system-prompt-file
+		if c.systemPromptFile == "" {
+			c.systemPromptFile = "prompts/review-system-prompt.md"
+		}
+		if _, err := os.Stat(c.systemPromptFile); err != nil {
+			return nil, fmt.Errorf("审查规则文件不存在 %q: %w", c.systemPromptFile, err)
+		}
+		p = prompt.UserPromptPrefix + diff
+		extraArgs = []string{"--system-prompt-file", c.systemPromptFile}
 	}
 
-	args := []string{
-		"-p", prompt.UserPromptPrefix + userPrompt,
-		"--system-prompt-file", c.systemPromptFile,
-		"--output-format", outputFormat,
-	}
+	args := []string{"-p", p, "--output-format", outputFormat}
+	args = append(args, extraArgs...)
 	if outputFormat == "stream-json" {
 		args = append(args, "--verbose")
 	}
@@ -53,8 +71,15 @@ func (c *Client) newCmd(ctx context.Context, outputFormat, userPrompt string) (*
 	}
 
 	cmd := exec.CommandContext(ctx, c.binPath, args...)
-	cmd.Dir = os.TempDir() // 中性工作目录，避免捡到任何项目 CLAUDE.md
+	cmd.Dir = os.TempDir() // 中性目录，避免捡到项目级 CLAUDE.md
 	return cmd, nil
+}
+
+func (c *Client) mode() string {
+	if c.skill != "" {
+		return "skill=" + c.skill
+	}
+	return "prompt-file=" + c.systemPromptFile
 }
 
 // jsonResult 对应 --output-format json 的顶层输出结构。
@@ -67,21 +92,18 @@ type jsonResult struct {
 type streamLine struct {
 	Type    string `json:"type"`
 	Subtype string `json:"subtype"`
-	// stream_event 格式（delta）
-	Event *struct {
+	Event   *struct {
 		Delta *struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"delta"`
 	} `json:"event"`
-	// assistant 格式（累积文本）
 	Message *struct {
 		Content []struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"content"`
 	} `json:"message"`
-	// result 格式（终止行）
 	Result  string `json:"result"`
 	IsError bool   `json:"is_error"`
 }
@@ -92,7 +114,7 @@ func (c *Client) Review(ctx context.Context, diff string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	log.Printf("claudecli: review project via %s (prompt-file=%s)", c.binPath, c.systemPromptFile)
+	log.Printf("claudecli: review (%s)", c.mode())
 
 	out, err := cmd.Output()
 	if err != nil {
@@ -123,7 +145,7 @@ func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(str
 	if err != nil {
 		return err
 	}
-	log.Printf("claudecli: stream review via %s (prompt-file=%s)", c.binPath, c.systemPromptFile)
+	log.Printf("claudecli: stream review (%s)", c.mode())
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -136,11 +158,10 @@ func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(str
 		return fmt.Errorf("启动 claude 失败: %w", err)
 	}
 
-	// 1 MB 行缓冲，防止大 diff 导致 scanner token too long
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 1<<20), 1<<20)
 
-	var prevLen int // 记录已推送的累积文本长度（assistant 格式用）
+	var prevLen int
 
 	for scanner.Scan() {
 		raw := scanner.Bytes()
@@ -149,7 +170,7 @@ func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(str
 		}
 		var line streamLine
 		if err := json.Unmarshal(raw, &line); err != nil {
-			continue // 跳过非 JSON 行
+			continue
 		}
 
 		switch line.Type {
