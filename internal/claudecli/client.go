@@ -141,8 +141,6 @@ func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(str
 	scanner := bufio.NewScanner(ptmx)
 	scanner.Buffer(make([]byte, 1<<20), 1<<20)
 
-	var prevLen int
-
 	for scanner.Scan() {
 		// PTY 在 cooked 模式下会将 \n 转为 \r\n，需要去掉尾部 \r
 		raw := strings.TrimRight(scanner.Text(), "\r")
@@ -166,16 +164,11 @@ func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(str
 			if line.Message == nil {
 				continue
 			}
-			var full strings.Builder
+			// claude CLI 的每条 assistant 消息是独立的增量块，直接输出即可。
 			for _, blk := range line.Message.Content {
-				if blk.Type == "text" {
-					full.WriteString(blk.Text)
+				if blk.Type == "text" && blk.Text != "" {
+					onToken(blk.Text)
 				}
-			}
-			fullStr := full.String()
-			if len(fullStr) > prevLen {
-				onToken(fullStr[prevLen:])
-				prevLen = len(fullStr)
 			}
 
 		case "result":
