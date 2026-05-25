@@ -34,6 +34,10 @@ func (c *Client) buildArgs(outputFormat, userPrompt string) []string {
 		"-p", fullPrompt,
 		"--output-format", outputFormat,
 	}
+	// stream-json 格式要求同时加 --verbose，否则 claude CLI 会退出码 1
+	if outputFormat == "stream-json" {
+		args = append(args, "--verbose")
+	}
 	if c.model != "" {
 		args = append(args, "--model", c.model)
 	}
