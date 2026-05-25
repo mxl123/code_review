@@ -2,10 +2,12 @@ package claudecli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os/exec"
 	"strings"
 
@@ -69,6 +71,7 @@ type streamLine struct {
 func (c *Client) Review(ctx context.Context, diff string) (string, error) {
 	args := c.buildArgs("json", prompt.UserPromptPrefix+diff)
 	cmd := exec.CommandContext(ctx, c.binPath, args...)
+	log.Printf("claudecli: 执行命令 %s %s", c.binPath, strings.Join(args[:min(2, len(args))], " "))
 
 	out, err := cmd.Output()
 	if err != nil {
@@ -97,11 +100,16 @@ func (c *Client) Review(ctx context.Context, diff string) (string, error) {
 func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(string)) error {
 	args := c.buildArgs("stream-json", prompt.UserPromptPrefix+diff)
 	cmd := exec.CommandContext(ctx, c.binPath, args...)
+	log.Printf("claudecli: 执行命令 %s %s", c.binPath, strings.Join(args[:min(2, len(args))], " "))
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("获取 stdout pipe 失败: %w", err)
 	}
+	// 捕获 stderr，确保进程退出时能看到完整错误信息
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
+
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("启动 claude 失败: %w", err)
 	}
@@ -165,11 +173,19 @@ func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(str
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		stderr := strings.TrimSpace(stderrBuf.String())
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return fmt.Errorf("claude 退出码 %d: %s", exitErr.ExitCode(), string(exitErr.Stderr))
+			return fmt.Errorf("claude 退出码 %d: %s", exitErr.ExitCode(), stderr)
 		}
-		return fmt.Errorf("claude 执行失败: %w", err)
+		return fmt.Errorf("claude 执行失败: %w (stderr: %s)", err, stderr)
 	}
 	return nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
