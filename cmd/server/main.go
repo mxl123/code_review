@@ -26,8 +26,8 @@ func main() {
 	var aiClient reviewer.AIClient
 	switch cfg.AIBackend {
 	case "claude-cli":
-		aiClient = claudecli.NewClient(cfg.ClaudeBinPath, cfg.ClaudeModel)
-		log.Printf("AI 后端: claude-cli (bin=%s model=%q)", cfg.ClaudeBinPath, cfg.ClaudeModel)
+		aiClient = claudecli.NewClient(cfg.ClaudeBinPath, cfg.ClaudeModel, cfg.ClaudeSystemPromptFile)
+		log.Printf("AI 后端: claude-cli (bin=%s model=%q prompt-file=%s)", cfg.ClaudeBinPath, cfg.ClaudeModel, cfg.ClaudeSystemPromptFile)
 	default:
 		aiClient = openai.NewClient(cfg.OpenAIAPIKey, cfg.OpenAIModel, cfg.OpenAIBaseURL)
 		log.Printf("AI 后端: openai (model=%s)", cfg.OpenAIModel)

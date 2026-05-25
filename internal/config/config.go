@@ -20,9 +20,10 @@ type Config struct {
 	APIKey        string // 可选，Chrome 插件调用 /api/* 时携带的鉴权 Key；为空则不校验
 	CORSOrigin    string // 可选，允许的跨域来源，如 https://gitlab.example.com；为空则允许所有
 
-	AIBackend     string // "openai"（默认）或 "claude-cli"
-	ClaudeBinPath string // claude 二进制路径，默认 "claude"
-	ClaudeModel   string // 可选，AI_BACKEND=claude-cli 时的模型覆盖
+	AIBackend            string // "openai"（默认）或 "claude-cli"
+	ClaudeBinPath        string // claude 二进制路径，默认 "claude"
+	ClaudeModel          string // 可选，AI_BACKEND=claude-cli 时的模型覆盖
+	ClaudeSystemPromptFile string // 审查规则文件路径，默认 prompts/review-system-prompt.md
 }
 
 func Load() (*Config, error) {
@@ -53,6 +54,7 @@ func Load() (*Config, error) {
 	cfg.APIKey = os.Getenv("API_KEY")                // 可选
 	cfg.CORSOrigin = os.Getenv("CORS_ORIGIN")        // 可选
 	cfg.ClaudeModel = os.Getenv("CLAUDE_MODEL")      // 可选
+	cfg.ClaudeSystemPromptFile = getEnvOrDefault("CLAUDE_SYSTEM_PROMPT_FILE", "prompts/review-system-prompt.md")
 
 	if cfg.AIBackend != "openai" && cfg.AIBackend != "claude-cli" {
 		return nil, fmt.Errorf("AI_BACKEND 必须为 'openai' 或 'claude-cli'，当前值: %q", cfg.AIBackend)

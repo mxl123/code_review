@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -15,33 +16,45 @@ import (
 )
 
 type Client struct {
-	binPath string // claude 二进制路径，默认 "claude"
-	model   string // 可选；为空时不传 --model，由 claude 使用默认模型
+	binPath          string // claude 二进制路径，默认 "claude"
+	model            string // 可选；为空时不传 --model
+	systemPromptFile string // 审查规则文件路径
 }
 
-func NewClient(binPath, model string) *Client {
+func NewClient(binPath, model, systemPromptFile string) *Client {
 	if binPath == "" {
 		binPath = "claude"
 	}
-	return &Client{binPath: binPath, model: model}
+	if systemPromptFile == "" {
+		systemPromptFile = "prompts/review-system-prompt.md"
+	}
+	return &Client{binPath: binPath, model: model, systemPromptFile: systemPromptFile}
 }
 
-func (c *Client) buildArgs(outputFormat, userPrompt string) []string {
-	// 将系统提示词直接拼入 -p 内容，而不使用 --system-prompt 参数。
-	// claude CLI 对含换行符的 --system-prompt 参数解析存在兼容性问题。
-	fullPrompt := prompt.SystemPrompt + "\n\n---\n\n" + userPrompt
+// newCmd 构造隔离的 exec.Cmd：
+//   - --system-prompt-file 替换全局 CLAUDE.md，屏蔽本机 skill/rule 干扰
+//   - Dir=/tmp 避免捡到项目级 CLAUDE.md
+func (c *Client) newCmd(ctx context.Context, outputFormat, userPrompt string) (*exec.Cmd, error) {
+	// 验证规则文件存在，给出明确报错
+	if _, err := os.Stat(c.systemPromptFile); err != nil {
+		return nil, fmt.Errorf("审查规则文件不存在 %q: %w", c.systemPromptFile, err)
+	}
+
 	args := []string{
-		"-p", fullPrompt,
+		"-p", prompt.UserPromptPrefix + userPrompt,
+		"--system-prompt-file", c.systemPromptFile,
 		"--output-format", outputFormat,
 	}
-	// stream-json 格式要求同时加 --verbose，否则 claude CLI 会退出码 1
 	if outputFormat == "stream-json" {
 		args = append(args, "--verbose")
 	}
 	if c.model != "" {
 		args = append(args, "--model", c.model)
 	}
-	return args
+
+	cmd := exec.CommandContext(ctx, c.binPath, args...)
+	cmd.Dir = os.TempDir() // 中性工作目录，避免捡到任何项目 CLAUDE.md
+	return cmd, nil
 }
 
 // jsonResult 对应 --output-format json 的顶层输出结构。
@@ -75,9 +88,11 @@ type streamLine struct {
 
 // Review 以非流式方式调用 claude CLI，返回完整审查结果。
 func (c *Client) Review(ctx context.Context, diff string) (string, error) {
-	args := c.buildArgs("json", prompt.UserPromptPrefix+diff)
-	cmd := exec.CommandContext(ctx, c.binPath, args...)
-	log.Printf("claudecli: 执行命令 %s %s", c.binPath, strings.Join(args[:min(2, len(args))], " "))
+	cmd, err := c.newCmd(ctx, "json", diff)
+	if err != nil {
+		return "", err
+	}
+	log.Printf("claudecli: review project via %s (prompt-file=%s)", c.binPath, c.systemPromptFile)
 
 	out, err := cmd.Output()
 	if err != nil {
@@ -104,15 +119,16 @@ func (c *Client) Review(ctx context.Context, diff string) (string, error) {
 
 // ReviewStream 以流式方式调用 claude CLI，每收到一个文本增量就调用 onToken。
 func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(string)) error {
-	args := c.buildArgs("stream-json", prompt.UserPromptPrefix+diff)
-	cmd := exec.CommandContext(ctx, c.binPath, args...)
-	log.Printf("claudecli: 执行命令 %s %s", c.binPath, strings.Join(args[:min(2, len(args))], " "))
+	cmd, err := c.newCmd(ctx, "stream-json", diff)
+	if err != nil {
+		return err
+	}
+	log.Printf("claudecli: stream review via %s (prompt-file=%s)", c.binPath, c.systemPromptFile)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("获取 stdout pipe 失败: %w", err)
 	}
-	// 捕获 stderr，确保进程退出时能看到完整错误信息
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
 
@@ -133,19 +149,17 @@ func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(str
 		}
 		var line streamLine
 		if err := json.Unmarshal(raw, &line); err != nil {
-			continue // 跳过非 JSON 行（进度提示等）
+			continue // 跳过非 JSON 行
 		}
 
 		switch line.Type {
 		case "stream_event":
-			// delta 格式：每行是独立增量
 			if line.Event != nil && line.Event.Delta != nil &&
 				line.Event.Delta.Type == "text_delta" && line.Event.Delta.Text != "" {
 				onToken(line.Event.Delta.Text)
 			}
 
 		case "assistant":
-			// 累积格式：text 字段为截至当前的完整文本，取新增部分
 			if line.Message == nil {
 				continue
 			}
@@ -166,7 +180,6 @@ func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(str
 				_ = cmd.Wait()
 				return fmt.Errorf("claude 审查出错: %s", line.Result)
 			}
-			// success — 流式传输结束，等待进程退出
 		}
 	}
 
@@ -187,11 +200,4 @@ func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(str
 		return fmt.Errorf("claude 执行失败: %w (stderr: %s)", err, stderr)
 	}
 	return nil
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

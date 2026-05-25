@@ -14,7 +14,6 @@ import (
 func writeFakeClaudeScript(t *testing.T, output string, exitCode int) string {
 	t.Helper()
 	dir := t.TempDir()
-	// 将输出内容写入数据文件，脚本用 cat 读取，避免 printf %q 转义换行符的问题
 	dataPath := filepath.Join(dir, "output.txt")
 	if err := os.WriteFile(dataPath, []byte(output), 0644); err != nil {
 		t.Fatalf("write fake claude data: %v", err)
@@ -27,12 +26,28 @@ func writeFakeClaudeScript(t *testing.T, output string, exitCode int) string {
 	return scriptPath
 }
 
+// writeFakePromptFile 在临时目录写一个假的系统提示词文件。
+func writeFakePromptFile(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "system-prompt.md")
+	if err := os.WriteFile(path, []byte("you are a code reviewer"), 0644); err != nil {
+		t.Fatalf("write fake prompt file: %v", err)
+	}
+	return path
+}
+
+// newTestClient 创建带假 claude 脚本和假提示词文件的 Client。
+func newTestClient(t *testing.T, output string, exitCode int) *Client {
+	t.Helper()
+	return NewClient(writeFakeClaudeScript(t, output, exitCode), "", writeFakePromptFile(t))
+}
+
 // ---- Review 测试 ----
 
 func TestReview_Success(t *testing.T) {
 	fixture := `{"type":"result","subtype":"success","result":"LGTM","is_error":false}`
-	binPath := writeFakeClaudeScript(t, fixture, 0)
-	c := NewClient(binPath, "")
+	c := newTestClient(t, fixture, 0)
 
 	got, err := c.Review(context.Background(), "diff here")
 	if err != nil {
@@ -45,8 +60,7 @@ func TestReview_Success(t *testing.T) {
 
 func TestReview_IsErrorTrue(t *testing.T) {
 	fixture := `{"type":"result","subtype":"error","result":"rate limit","is_error":true}`
-	binPath := writeFakeClaudeScript(t, fixture, 0)
-	c := NewClient(binPath, "")
+	c := newTestClient(t, fixture, 0)
 
 	_, err := c.Review(context.Background(), "diff")
 	if err == nil {
@@ -58,8 +72,7 @@ func TestReview_IsErrorTrue(t *testing.T) {
 }
 
 func TestReview_NonZeroExitCode(t *testing.T) {
-	binPath := writeFakeClaudeScript(t, "", 1)
-	c := NewClient(binPath, "")
+	c := newTestClient(t, "", 1)
 
 	_, err := c.Review(context.Background(), "diff")
 	if err == nil {
@@ -68,8 +81,7 @@ func TestReview_NonZeroExitCode(t *testing.T) {
 }
 
 func TestReview_InvalidJSON(t *testing.T) {
-	binPath := writeFakeClaudeScript(t, "not json", 0)
-	c := NewClient(binPath, "")
+	c := newTestClient(t, "not json", 0)
 
 	_, err := c.Review(context.Background(), "diff")
 	if err == nil {
@@ -87,8 +99,7 @@ func TestReviewStream_StreamEventDelta(t *testing.T) {
 		`{"type":"result","subtype":"success","result":"Hello world","is_error":false}`,
 	}, "\n") + "\n"
 
-	binPath := writeFakeClaudeScript(t, lines, 0)
-	c := NewClient(binPath, "")
+	c := newTestClient(t, lines, 0)
 
 	var tokens []string
 	err := c.ReviewStream(context.Background(), "diff", func(tok string) {
@@ -103,15 +114,13 @@ func TestReviewStream_StreamEventDelta(t *testing.T) {
 }
 
 func TestReviewStream_AssistantCumulativeText(t *testing.T) {
-	// assistant 格式：每行含截至目前的完整文本
 	lines := strings.Join([]string{
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"Hello"}]}}`,
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"Hello world"}]}}`,
 		`{"type":"result","subtype":"success","result":"Hello world","is_error":false}`,
 	}, "\n") + "\n"
 
-	binPath := writeFakeClaudeScript(t, lines, 0)
-	c := NewClient(binPath, "")
+	c := newTestClient(t, lines, 0)
 
 	var tokens []string
 	err := c.ReviewStream(context.Background(), "diff", func(tok string) {
@@ -133,8 +142,7 @@ func TestReviewStream_AssistantCumulativeText(t *testing.T) {
 
 func TestReviewStream_ErrorResult(t *testing.T) {
 	lines := `{"type":"result","subtype":"error_max_turns","result":"timeout","is_error":true}` + "\n"
-	binPath := writeFakeClaudeScript(t, lines, 0)
-	c := NewClient(binPath, "")
+	c := newTestClient(t, lines, 0)
 
 	err := c.ReviewStream(context.Background(), "diff", func(_ string) {})
 	if err == nil {
@@ -152,8 +160,7 @@ func TestReviewStream_NonJSONLinesSkipped(t *testing.T) {
 		`{"type":"result","subtype":"success","result":"ok","is_error":false}`,
 	}, "\n") + "\n"
 
-	binPath := writeFakeClaudeScript(t, lines, 0)
-	c := NewClient(binPath, "")
+	c := newTestClient(t, lines, 0)
 
 	var tokens []string
 	err := c.ReviewStream(context.Background(), "diff", func(tok string) {
