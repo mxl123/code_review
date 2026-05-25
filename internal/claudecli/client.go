@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"os"
 	"os/exec"
 	"strings"
 
@@ -16,71 +15,31 @@ import (
 )
 
 type Client struct {
-	binPath          string // claude 二进制路径，默认 "claude"
-	model            string // 可选；为空时不传 --model
-	systemPromptFile string // 提示词文件模式：规则文件路径
-	skill            string // 技能模式：~/.claude/commands/ 中的 skill 名称（不含 /）
+	binPath string // claude 二进制路径，默认 "claude"
+	model   string // 可选；为空时不传 --model
 }
 
-func NewClient(binPath, model, systemPromptFile, skill string) *Client {
+func NewClient(binPath, model string) *Client {
 	if binPath == "" {
 		binPath = "claude"
 	}
-	return &Client{
-		binPath:          binPath,
-		model:            model,
-		systemPromptFile: systemPromptFile,
-		skill:            skill,
-	}
+	return &Client{binPath: binPath, model: model}
 }
 
-// newCmd 根据配置构造子进程：
-//
-//   - 技能模式（CLAUDE_SKILL 已设置）：
-//     prompt = "/<skill>\n\n<diff>"，不使用 --system-prompt-file，
-//     由 skill 定义审查逻辑，工作目录设为 /tmp 避免捡到项目 CLAUDE.md。
-//
-//   - 提示词文件模式（默认）：
-//     使用 --system-prompt-file 完全替换 CLAUDE.md，完全隔离本机配置。
-func (c *Client) newCmd(ctx context.Context, outputFormat, diff string) (*exec.Cmd, error) {
-	var p string
-	var extraArgs []string
-
-	if c.skill != "" {
-		// 技能模式：skill 的规则写入用户消息，--system-prompt-file 指向空文件屏蔽 CLAUDE.md
-		p = "/" + c.skill + "\n\n" + prompt.UserPromptPrefix + diff
-		extraArgs = []string{"--system-prompt-file", "/dev/null"}
-	} else {
-		// 提示词文件模式：验证文件存在后加 --system-prompt-file
-		if c.systemPromptFile == "" {
-			c.systemPromptFile = "prompts/review-system-prompt.md"
-		}
-		if _, err := os.Stat(c.systemPromptFile); err != nil {
-			return nil, fmt.Errorf("审查规则文件不存在 %q: %w", c.systemPromptFile, err)
-		}
-		p = prompt.UserPromptPrefix + diff
-		extraArgs = []string{"--system-prompt-file", c.systemPromptFile}
+// newCmd 构造 claude 子进程。
+// 不设置 cmd.Dir，继承服务进程的工作目录，自动读取该目录下的 CLAUDE.md。
+func (c *Client) newCmd(ctx context.Context, outputFormat, diff string) *exec.Cmd {
+	args := []string{
+		"-p", prompt.UserPromptPrefix + diff,
+		"--output-format", outputFormat,
 	}
-
-	args := []string{"-p", p, "--output-format", outputFormat}
-	args = append(args, extraArgs...)
 	if outputFormat == "stream-json" {
 		args = append(args, "--verbose")
 	}
 	if c.model != "" {
 		args = append(args, "--model", c.model)
 	}
-
-	cmd := exec.CommandContext(ctx, c.binPath, args...)
-	cmd.Dir = os.TempDir() // 中性目录，避免捡到项目级 CLAUDE.md
-	return cmd, nil
-}
-
-func (c *Client) mode() string {
-	if c.skill != "" {
-		return "skill=" + c.skill
-	}
-	return "prompt-file=" + c.systemPromptFile
+	return exec.CommandContext(ctx, c.binPath, args...)
 }
 
 // jsonResult 对应 --output-format json 的顶层输出结构。
@@ -111,11 +70,8 @@ type streamLine struct {
 
 // Review 以非流式方式调用 claude CLI，返回完整审查结果。
 func (c *Client) Review(ctx context.Context, diff string) (string, error) {
-	cmd, err := c.newCmd(ctx, "json", diff)
-	if err != nil {
-		return "", err
-	}
-	log.Printf("claudecli: review (%s)", c.mode())
+	cmd := c.newCmd(ctx, "json", diff)
+	log.Printf("claudecli: review via %s", c.binPath)
 
 	out, err := cmd.Output()
 	if err != nil {
@@ -142,11 +98,8 @@ func (c *Client) Review(ctx context.Context, diff string) (string, error) {
 
 // ReviewStream 以流式方式调用 claude CLI，每收到一个文本增量就调用 onToken。
 func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(string)) error {
-	cmd, err := c.newCmd(ctx, "stream-json", diff)
-	if err != nil {
-		return err
-	}
-	log.Printf("claudecli: stream review (%s)", c.mode())
+	cmd := c.newCmd(ctx, "stream-json", diff)
+	log.Printf("claudecli: stream review via %s", c.binPath)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
