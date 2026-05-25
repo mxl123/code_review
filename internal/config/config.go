@@ -29,11 +29,19 @@ func Load() (*Config, error) {
 	// 尝试加载 .env 文件，文件不存在时静默跳过，生产环境无影响
 	_ = godotenv.Load()
 
+	aiBackend := getEnvOrDefault("AI_BACKEND", "openai")
+
+	// 按后端设不同默认值：claude-cli 上下文窗口大，适当放宽；openai 保持保守值兼容各模型
+	defaultMaxDiff := 60000
+	if aiBackend == "claude-cli" {
+		defaultMaxDiff = 150000
+	}
+
 	cfg := &Config{
 		OpenAIModel:   getEnvOrDefault("OPENAI_MODEL", "gpt-4o"),
 		ServerPort:    getEnvOrDefault("SERVER_PORT", "8080"),
-		MaxDiffBytes:  60000,
-		AIBackend:     getEnvOrDefault("AI_BACKEND", "openai"),
+		MaxDiffBytes:  defaultMaxDiff,
+		AIBackend:     aiBackend,
 		ClaudeBinPath: getEnvOrDefault("CLAUDE_BIN_PATH", "claude"),
 	}
 

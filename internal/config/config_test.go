@@ -171,6 +171,9 @@ func TestLoad_ClaudeCLIBackend_NoOpenAIKeyRequired(t *testing.T) {
 	if cfg.ClaudeBinPath != "claude" {
 		t.Errorf("ClaudeBinPath = %q, want 'claude'", cfg.ClaudeBinPath)
 	}
+	if cfg.MaxDiffBytes != 150000 {
+		t.Errorf("claude-cli default MaxDiffBytes = %d, want 150000", cfg.MaxDiffBytes)
+	}
 }
 
 func TestLoad_InvalidAIBackend(t *testing.T) {
