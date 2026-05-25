@@ -212,6 +212,10 @@ func (h *Handler) triggerStream(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("api: 流式审查开始 project=%d mr=%d", req.ProjectID, req.MRIID)
 
+	// 立即发送响应头和 open 事件，让客户端知道连接已建立，
+	// 避免在 GitLab/AI 初始化的几秒内 SSE 连接被判定为超时。
+	sendSSE(w, flusher, "open", "")
+
 	var resultBuf strings.Builder
 	err := h.runner.RunReviewStream(gl, req.ProjectID, req.MRIID, func(chunk string) {
 		resultBuf.WriteString(chunk)
