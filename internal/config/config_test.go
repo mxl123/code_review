@@ -154,3 +154,46 @@ func TestLoad_MaxDiffBytesZero(t *testing.T) {
 		t.Errorf("MaxDiffBytes = %d, want 0", cfg.MaxDiffBytes)
 	}
 }
+
+func TestLoad_ClaudeCLIBackend_NoOpenAIKeyRequired(t *testing.T) {
+	t.Setenv("GITLAB_URL", "https://gitlab.example.com")
+	t.Setenv("GITLAB_TOKEN", "glpat-test")
+	t.Setenv("WEBHOOK_SECRET", "secret")
+	t.Setenv("AI_BACKEND", "claude-cli")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error with claude-cli backend: %v", err)
+	}
+	if cfg.AIBackend != "claude-cli" {
+		t.Errorf("AIBackend = %q, want claude-cli", cfg.AIBackend)
+	}
+	if cfg.ClaudeBinPath != "claude" {
+		t.Errorf("ClaudeBinPath = %q, want 'claude'", cfg.ClaudeBinPath)
+	}
+}
+
+func TestLoad_InvalidAIBackend(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("AI_BACKEND", "gpt-magic")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for invalid AI_BACKEND")
+	}
+	if !strings.Contains(err.Error(), "AI_BACKEND") {
+		t.Errorf("error %q should mention AI_BACKEND", err)
+	}
+}
+
+func TestLoad_ClaudeBinPathDefault(t *testing.T) {
+	setRequiredEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.ClaudeBinPath != "claude" {
+		t.Errorf("ClaudeBinPath default = %q, want 'claude'", cfg.ClaudeBinPath)
+	}
+}

@@ -19,6 +19,10 @@ type Config struct {
 	MaxDiffBytes  int
 	APIKey        string // 可选，Chrome 插件调用 /api/* 时携带的鉴权 Key；为空则不校验
 	CORSOrigin    string // 可选，允许的跨域来源，如 https://gitlab.example.com；为空则允许所有
+
+	AIBackend     string // "openai"（默认）或 "claude-cli"
+	ClaudeBinPath string // claude 二进制路径，默认 "claude"
+	ClaudeModel   string // 可选，AI_BACKEND=claude-cli 时的模型覆盖
 }
 
 func Load() (*Config, error) {
@@ -26,9 +30,11 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		OpenAIModel:  getEnvOrDefault("OPENAI_MODEL", "gpt-4o"),
-		ServerPort:   getEnvOrDefault("SERVER_PORT", "8080"),
-		MaxDiffBytes: 60000,
+		OpenAIModel:   getEnvOrDefault("OPENAI_MODEL", "gpt-4o"),
+		ServerPort:    getEnvOrDefault("SERVER_PORT", "8080"),
+		MaxDiffBytes:  60000,
+		AIBackend:     getEnvOrDefault("AI_BACKEND", "openai"),
+		ClaudeBinPath: getEnvOrDefault("CLAUDE_BIN_PATH", "claude"),
 	}
 
 	if v := os.Getenv("MAX_DIFF_BYTES"); v != "" {
@@ -46,6 +52,11 @@ func Load() (*Config, error) {
 	cfg.OpenAIBaseURL = os.Getenv("OPENAI_BASE_URL") // 可选
 	cfg.APIKey = os.Getenv("API_KEY")                // 可选
 	cfg.CORSOrigin = os.Getenv("CORS_ORIGIN")        // 可选
+	cfg.ClaudeModel = os.Getenv("CLAUDE_MODEL")      // 可选
+
+	if cfg.AIBackend != "openai" && cfg.AIBackend != "claude-cli" {
+		return nil, fmt.Errorf("AI_BACKEND 必须为 'openai' 或 'claude-cli'，当前值: %q", cfg.AIBackend)
+	}
 
 	var missing []string
 	if cfg.GitLabURL == "" {
@@ -57,7 +68,8 @@ func Load() (*Config, error) {
 	if cfg.WebhookSecret == "" {
 		missing = append(missing, "WEBHOOK_SECRET")
 	}
-	if cfg.OpenAIAPIKey == "" {
+	// OPENAI_API_KEY 仅在使用 openai 后端时必填
+	if cfg.AIBackend != "claude-cli" && cfg.OpenAIAPIKey == "" {
 		missing = append(missing, "OPENAI_API_KEY")
 	}
 

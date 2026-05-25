@@ -11,22 +11,9 @@ import (
 	"strings"
 
 	goopenai "github.com/sashabaranov/go-openai"
+
+	"code-review/internal/prompt"
 )
-
-const systemPrompt = `你是一位资深软件工程师，正在对 Merge Request 进行代码审查。请用**中文**提供具体、可操作的改进建议，重点关注以下方面：
-
-1. **缺陷与正确性** — 逻辑错误、边界问题、空指针风险、竞态条件
-2. **安全性** — 注入漏洞、输入校验缺失、敏感信息泄露、不安全的默认配置
-3. **性能** — O(n²) 操作、不必要的内存分配、热路径中的阻塞调用
-4. **可维护性** — 过于复杂的逻辑、缺少错误处理、命名不清晰、非显而易见的代码缺少注释
-5. **最佳实践** — 语言惯用写法、测试覆盖不足、API 设计问题
-
-输出格式要求：
-- 使用 Markdown 格式，适合直接发布到 GitLab MR 评论
-- 每个有问题的分类使用二级标题（##），没有问题的分类直接省略
-- 每条问题以**文件路径加粗**开头，说明具体位置和改进建议
-- 如果整体代码质量良好，在末尾简短说明
-- **所有内容必须使用中文输出**`
 
 // debugTransport 在响应不是 JSON 时记录原始响应体，帮助排查 URL 配置问题。
 type debugTransport struct {
@@ -80,8 +67,8 @@ func NewClient(apiKey, model, baseURL string) *Client {
 
 func (c *Client) messages(diff string) []goopenai.ChatCompletionMessage {
 	return []goopenai.ChatCompletionMessage{
-		{Role: goopenai.ChatMessageRoleSystem, Content: systemPrompt},
-		{Role: goopenai.ChatMessageRoleUser, Content: "请审查以下 Merge Request 的代码变更：\n\n" + diff},
+		{Role: goopenai.ChatMessageRoleSystem, Content: prompt.SystemPrompt},
+		{Role: goopenai.ChatMessageRoleUser, Content: prompt.UserPromptPrefix + diff},
 	}
 }
 

@@ -37,6 +37,16 @@ func (m *mockAI) Review(_ context.Context, _ string) (string, error) {
 	return m.result, m.err
 }
 
+func (m *mockAI) ReviewStream(_ context.Context, _ string, onToken func(string)) error {
+	if m.err != nil {
+		return m.err
+	}
+	if m.result != "" {
+		onToken(m.result)
+	}
+	return nil
+}
+
 // ---- 辅助函数 ----
 
 func makeChanges(files ...gitlab.Change) *gitlab.MRChanges {
