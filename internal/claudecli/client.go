@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/creack/pty"
 
@@ -138,6 +139,7 @@ func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(str
 	for scanner.Scan() {
 		// PTY 在 cooked 模式下会将 \n 转为 \r\n，需要去掉尾部 \r
 		raw := strings.TrimRight(scanner.Text(), "\r")
+		log.Printf("claudecli: line at %s len=%d prefix=%q", time.Now().Format("15:04:05.000"), len(raw), truncate(raw, 60))
 		if len(raw) == 0 {
 			continue
 		}
@@ -194,4 +196,11 @@ func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(str
 		return fmt.Errorf("claude 执行失败: %w", err)
 	}
 	return nil
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
 }
