@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -15,22 +16,32 @@ import (
 )
 
 type Client struct {
-	binPath string // claude 二进制路径，默认 "claude"
-	model   string // 可选；为空时不传 --model
+	binPath          string // claude 二进制路径，默认 "claude"
+	model            string // 可选；为空时不传 --model
+	systemPromptFile string // 审查规则文件，通过 --system-prompt-file 加载，不影响项目开发
 }
 
-func NewClient(binPath, model string) *Client {
+func NewClient(binPath, model, systemPromptFile string) *Client {
 	if binPath == "" {
 		binPath = "claude"
 	}
-	return &Client{binPath: binPath, model: model}
+	if systemPromptFile == "" {
+		systemPromptFile = "prompts/review-system-prompt.md"
+	}
+	return &Client{binPath: binPath, model: model, systemPromptFile: systemPromptFile}
 }
 
-// newCmd 构造 claude 子进程。
-// 不设置 cmd.Dir，继承服务进程的工作目录，自动读取该目录下的 CLAUDE.md。
-func (c *Client) newCmd(ctx context.Context, outputFormat, diff string) *exec.Cmd {
+// newCmd 构造 claude 子进程：
+//   - --system-prompt-file 替换全局 CLAUDE.md，隔离本机开发环境配置
+//   - cmd.Dir 不设置，继承服务工作目录（需能找到 systemPromptFile）
+func (c *Client) newCmd(ctx context.Context, outputFormat, diff string) (*exec.Cmd, error) {
+	if _, err := os.Stat(c.systemPromptFile); err != nil {
+		return nil, fmt.Errorf("审查规则文件不存在 %q: %w", c.systemPromptFile, err)
+	}
+
 	args := []string{
 		"-p", prompt.UserPromptPrefix + diff,
+		"--system-prompt-file", c.systemPromptFile,
 		"--output-format", outputFormat,
 	}
 	if outputFormat == "stream-json" {
@@ -39,7 +50,8 @@ func (c *Client) newCmd(ctx context.Context, outputFormat, diff string) *exec.Cm
 	if c.model != "" {
 		args = append(args, "--model", c.model)
 	}
-	return exec.CommandContext(ctx, c.binPath, args...)
+
+	return exec.CommandContext(ctx, c.binPath, args...), nil
 }
 
 // jsonResult 对应 --output-format json 的顶层输出结构。
@@ -70,8 +82,11 @@ type streamLine struct {
 
 // Review 以非流式方式调用 claude CLI，返回完整审查结果。
 func (c *Client) Review(ctx context.Context, diff string) (string, error) {
-	cmd := c.newCmd(ctx, "json", diff)
-	log.Printf("claudecli: review via %s", c.binPath)
+	cmd, err := c.newCmd(ctx, "json", diff)
+	if err != nil {
+		return "", err
+	}
+	log.Printf("claudecli: review (prompt-file=%s)", c.systemPromptFile)
 
 	out, err := cmd.Output()
 	if err != nil {
@@ -98,8 +113,11 @@ func (c *Client) Review(ctx context.Context, diff string) (string, error) {
 
 // ReviewStream 以流式方式调用 claude CLI，每收到一个文本增量就调用 onToken。
 func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(string)) error {
-	cmd := c.newCmd(ctx, "stream-json", diff)
-	log.Printf("claudecli: stream review via %s", c.binPath)
+	cmd, err := c.newCmd(ctx, "stream-json", diff)
+	if err != nil {
+		return err
+	}
+	log.Printf("claudecli: stream review (prompt-file=%s)", c.systemPromptFile)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

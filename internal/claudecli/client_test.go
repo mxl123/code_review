@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -13,11 +14,11 @@ import (
 func writeFakeClaudeScript(t *testing.T, output string, exitCode int) string {
 	t.Helper()
 	dir := t.TempDir()
-	dataPath := dir + "/output.txt"
+	dataPath := filepath.Join(dir, "output.txt")
 	if err := os.WriteFile(dataPath, []byte(output), 0644); err != nil {
 		t.Fatalf("write fake claude data: %v", err)
 	}
-	scriptPath := dir + "/claude"
+	scriptPath := filepath.Join(dir, "claude")
 	script := fmt.Sprintf("#!/bin/sh\ncat %q\nexit %d\n", dataPath, exitCode)
 	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
 		t.Fatalf("write fake claude script: %v", err)
@@ -25,10 +26,20 @@ func writeFakeClaudeScript(t *testing.T, output string, exitCode int) string {
 	return scriptPath
 }
 
-// newTestClient 创建带假 claude 脚本的 Client。
+// writeFakePromptFile 写一个假的审查规则文件。
+func writeFakePromptFile(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "system-prompt.md")
+	if err := os.WriteFile(path, []byte("you are a code reviewer"), 0644); err != nil {
+		t.Fatalf("write fake prompt file: %v", err)
+	}
+	return path
+}
+
+// newTestClient 创建带假 claude 脚本和假规则文件的 Client。
 func newTestClient(t *testing.T, output string, exitCode int) *Client {
 	t.Helper()
-	return NewClient(writeFakeClaudeScript(t, output, exitCode), "")
+	return NewClient(writeFakeClaudeScript(t, output, exitCode), "", writeFakePromptFile(t))
 }
 
 // ---- Review 测试 ----
