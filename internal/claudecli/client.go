@@ -123,6 +123,10 @@ func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(str
 	}
 	log.Printf("claudecli: stream review (prompt-file=%s)", c.systemPromptFile)
 
+	// 清除 CI 相关变量，避免 claude CLI（Node.js）在 CI 环境中禁用交互/流式输出。
+	cmd.Env = filterEnv(os.Environ(), "CI", "CONTINUOUS_INTEGRATION", "BUILD_ID")
+	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
+
 	// pty.Start 分配一个伪终端并启动子进程，使其以为 stdout 是 TTY，
 	// 从而强制行缓冲输出，实现真正的流式传输。
 	ptmx, err := pty.Start(cmd)
@@ -130,6 +134,9 @@ func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(str
 		return fmt.Errorf("启动 claude 失败: %w", err)
 	}
 	defer ptmx.Close()
+
+	// 设置终端窗口大小，部分程序通过 TIOCGWINSZ 判断是否为真实终端。
+	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 50, Cols: 220})
 
 	scanner := bufio.NewScanner(ptmx)
 	scanner.Buffer(make([]byte, 1<<20), 1<<20)
@@ -203,4 +210,22 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n]
+}
+
+// filterEnv 从 env 中移除 key 等于 remove 列表中任意一项的条目（忽略值）。
+func filterEnv(env []string, remove ...string) []string {
+	out := make([]string, 0, len(env))
+	for _, e := range env {
+		keep := true
+		for _, r := range remove {
+			if len(e) >= len(r)+1 && e[:len(r)] == r && e[len(r)] == '=' {
+				keep = false
+				break
+			}
+		}
+		if keep {
+			out = append(out, e)
+		}
+	}
+	return out
 }
