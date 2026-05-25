@@ -27,9 +27,11 @@ func NewClient(binPath, model string) *Client {
 }
 
 func (c *Client) buildArgs(outputFormat, userPrompt string) []string {
+	// 将系统提示词直接拼入 -p 内容，而不使用 --system-prompt 参数。
+	// claude CLI 对含换行符的 --system-prompt 参数解析存在兼容性问题。
+	fullPrompt := prompt.SystemPrompt + "\n\n---\n\n" + userPrompt
 	args := []string{
-		"-p", userPrompt,
-		"--system-prompt", prompt.SystemPrompt,
+		"-p", fullPrompt,
 		"--output-format", outputFormat,
 	}
 	if c.model != "" {
