@@ -47,8 +47,9 @@ func (c *Client) newCmd(ctx context.Context, outputFormat, diff string) (*exec.C
 	var extraArgs []string
 
 	if c.skill != "" {
-		// 技能模式：把 diff 作为 skill 的输入追加在斜杠命令之后
+		// 技能模式：skill 的规则写入用户消息，--system-prompt-file 指向空文件屏蔽 CLAUDE.md
 		p = "/" + c.skill + "\n\n" + prompt.UserPromptPrefix + diff
+		extraArgs = []string{"--system-prompt-file", "/dev/null"}
 	} else {
 		// 提示词文件模式：验证文件存在后加 --system-prompt-file
 		if c.systemPromptFile == "" {
