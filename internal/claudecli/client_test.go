@@ -112,11 +112,11 @@ func TestReviewStream_StreamEventDelta(t *testing.T) {
 	}
 }
 
-func TestReviewStream_AssistantMultipleMessages(t *testing.T) {
-	// claude CLI 输出的 assistant 消息是独立增量（非累积快照），每条直接 emit。
+func TestReviewStream_AssistantCumulativePartial(t *testing.T) {
+	// --include-partial-messages 模式下 assistant 消息是累积快照，取差值得到新增 token。
 	lines := strings.Join([]string{
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"Hello"}]}}`,
-		`{"type":"assistant","message":{"content":[{"type":"text","text":" world"}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"Hello world"}]}}`,
 		`{"type":"result","subtype":"success","result":"Hello world","is_error":false}`,
 	}, "\n") + "\n"
 
@@ -133,10 +133,10 @@ func TestReviewStream_AssistantMultipleMessages(t *testing.T) {
 		t.Errorf("reconstructed = %q, want 'Hello world'", got)
 	}
 	if len(tokens) != 2 {
-		t.Errorf("expected 2 emissions, got %d: %v", len(tokens), tokens)
+		t.Errorf("expected 2 delta emissions, got %d: %v", len(tokens), tokens)
 	}
 	if tokens[0] != "Hello" || tokens[1] != " world" {
-		t.Errorf("tokens = %v, want ['Hello', ' world']", tokens)
+		t.Errorf("deltas = %v, want ['Hello', ' world']", tokens)
 	}
 }
 

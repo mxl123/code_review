@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/creack/pty"
 
@@ -48,7 +47,7 @@ func (c *Client) newCmd(ctx context.Context, outputFormat, diff string) (*exec.C
 		"--output-format", outputFormat,
 	}
 	if outputFormat == "stream-json" {
-		args = append(args, "--verbose")
+		args = append(args, "--verbose", "--include-partial-messages")
 	}
 	if c.model != "" {
 		args = append(args, "--model", c.model)
@@ -138,6 +137,8 @@ func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(str
 	scanner := bufio.NewScanner(ptmx)
 	scanner.Buffer(make([]byte, 1<<20), 1<<20)
 
+	var prevLen int
+
 	for scanner.Scan() {
 		raw := strings.TrimRight(scanner.Text(), "\r")
 		if len(raw) == 0 {
@@ -159,12 +160,17 @@ func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(str
 			if line.Message == nil {
 				continue
 			}
-			// claude CLI 每条 assistant 消息是整段文字，拆成小块逐步 emit，
-			// 模拟 token 级流式效果，与 OpenAI 后端的视觉体验保持一致。
+			// --include-partial-messages 使每条 assistant 消息都是累积快照，
+			// 取与上一条的差值即为新增 token。
+			var full strings.Builder
 			for _, blk := range line.Message.Content {
-				if blk.Type == "text" && blk.Text != "" {
-					emitChunked(ctx, blk.Text, onToken)
+				if blk.Type == "text" {
+					full.WriteString(blk.Text)
 				}
+			}
+			if s := full.String(); len(s) > prevLen {
+				onToken(s[prevLen:])
+				prevLen = len(s)
 			}
 
 		case "result":
@@ -191,29 +197,6 @@ func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(str
 		return fmt.Errorf("claude 执行失败: %w", err)
 	}
 	return nil
-}
-
-// emitChunked 将 text 按每 10 个字符一批逐步调用 onToken，批次间暂停 10ms，
-// 使大段文字以类似 token 流的速度逐步显示。
-func emitChunked(ctx context.Context, text string, onToken func(string)) {
-	const (
-		chunkRunes = 10
-		delay      = 10 * time.Millisecond
-	)
-	runes := []rune(text)
-	for i := 0; i < len(runes); i += chunkRunes {
-		if ctx.Err() != nil {
-			return
-		}
-		end := i + chunkRunes
-		if end > len(runes) {
-			end = len(runes)
-		}
-		onToken(string(runes[i:end]))
-		if end < len(runes) {
-			time.Sleep(delay)
-		}
-	}
 }
 
 // filterEnv 从 env 中移除 key 等于 remove 列表中任意一项的条目（忽略值）。
