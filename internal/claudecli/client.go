@@ -2,7 +2,6 @@ package claudecli
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +10,9 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
+
+	"github.com/creack/pty"
 
 	"code-review/internal/prompt"
 )
@@ -112,6 +114,7 @@ func (c *Client) Review(ctx context.Context, diff string) (string, error) {
 }
 
 // ReviewStream 以流式方式调用 claude CLI，每收到一个文本增量就调用 onToken。
+// 使用 PTY 启动子进程，使 claude CLI 认为 stdout 是终端，从而启用行缓冲实时输出。
 func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(string)) error {
 	cmd, err := c.newCmd(ctx, "stream-json", diff)
 	if err != nil {
@@ -119,29 +122,27 @@ func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(str
 	}
 	log.Printf("claudecli: stream review (prompt-file=%s)", c.systemPromptFile)
 
-	stdout, err := cmd.StdoutPipe()
+	// pty.Start 分配一个伪终端并启动子进程，使其以为 stdout 是 TTY，
+	// 从而强制行缓冲输出，实现真正的流式传输。
+	ptmx, err := pty.Start(cmd)
 	if err != nil {
-		return fmt.Errorf("获取 stdout pipe 失败: %w", err)
-	}
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
-
-	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("启动 claude 失败: %w", err)
 	}
+	defer ptmx.Close()
 
-	scanner := bufio.NewScanner(stdout)
+	scanner := bufio.NewScanner(ptmx)
 	scanner.Buffer(make([]byte, 1<<20), 1<<20)
 
 	var prevLen int
 
 	for scanner.Scan() {
-		raw := scanner.Bytes()
+		// PTY 在 cooked 模式下会将 \n 转为 \r\n，需要去掉尾部 \r
+		raw := strings.TrimRight(scanner.Text(), "\r")
 		if len(raw) == 0 {
 			continue
 		}
 		var line streamLine
-		if err := json.Unmarshal(raw, &line); err != nil {
+		if err := json.Unmarshal([]byte(raw), &line); err != nil {
 			continue
 		}
 
@@ -176,7 +177,8 @@ func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(str
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
+	// PTY slave 关闭后，从 master 读取会返回 EIO，属于正常结束信号。
+	if err := scanner.Err(); err != nil && !errors.Is(err, syscall.EIO) {
 		_ = cmd.Wait()
 		return fmt.Errorf("读取 claude 输出失败: %w", err)
 	}
@@ -185,12 +187,11 @@ func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(str
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		stderr := strings.TrimSpace(stderrBuf.String())
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return fmt.Errorf("claude 退出码 %d: %s", exitErr.ExitCode(), stderr)
+			return fmt.Errorf("claude 退出码 %d", exitErr.ExitCode())
 		}
-		return fmt.Errorf("claude 执行失败: %w (stderr: %s)", err, stderr)
+		return fmt.Errorf("claude 执行失败: %w", err)
 	}
 	return nil
 }
