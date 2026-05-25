@@ -127,24 +127,19 @@ func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(str
 	cmd.Env = filterEnv(os.Environ(), "CI", "CONTINUOUS_INTEGRATION", "BUILD_ID")
 	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
 
-	// pty.Start 分配一个伪终端并启动子进程，使其以为 stdout 是 TTY，
-	// 从而强制行缓冲输出，实现真正的流式传输。
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		return fmt.Errorf("启动 claude 失败: %w", err)
 	}
 	defer ptmx.Close()
 
-	// 设置终端窗口大小，部分程序通过 TIOCGWINSZ 判断是否为真实终端。
 	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 50, Cols: 220})
 
 	scanner := bufio.NewScanner(ptmx)
 	scanner.Buffer(make([]byte, 1<<20), 1<<20)
 
 	for scanner.Scan() {
-		// PTY 在 cooked 模式下会将 \n 转为 \r\n，需要去掉尾部 \r
 		raw := strings.TrimRight(scanner.Text(), "\r")
-		log.Printf("claudecli: line at %s len=%d prefix=%q", time.Now().Format("15:04:05.000"), len(raw), truncate(raw, 60))
 		if len(raw) == 0 {
 			continue
 		}
@@ -164,10 +159,11 @@ func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(str
 			if line.Message == nil {
 				continue
 			}
-			// claude CLI 的每条 assistant 消息是独立的增量块，直接输出即可。
+			// claude CLI 每条 assistant 消息是整段文字，拆成小块逐步 emit，
+			// 模拟 token 级流式效果，与 OpenAI 后端的视觉体验保持一致。
 			for _, blk := range line.Message.Content {
 				if blk.Type == "text" && blk.Text != "" {
-					onToken(blk.Text)
+					emitChunked(ctx, blk.Text, onToken)
 				}
 			}
 
@@ -179,7 +175,6 @@ func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(str
 		}
 	}
 
-	// PTY slave 关闭后，从 master 读取会返回 EIO，属于正常结束信号。
 	if err := scanner.Err(); err != nil && !errors.Is(err, syscall.EIO) {
 		_ = cmd.Wait()
 		return fmt.Errorf("读取 claude 输出失败: %w", err)
@@ -198,11 +193,27 @@ func (c *Client) ReviewStream(ctx context.Context, diff string, onToken func(str
 	return nil
 }
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
+// emitChunked 将 text 按每 10 个字符一批逐步调用 onToken，批次间暂停 10ms，
+// 使大段文字以类似 token 流的速度逐步显示。
+func emitChunked(ctx context.Context, text string, onToken func(string)) {
+	const (
+		chunkRunes = 10
+		delay      = 10 * time.Millisecond
+	)
+	runes := []rune(text)
+	for i := 0; i < len(runes); i += chunkRunes {
+		if ctx.Err() != nil {
+			return
+		}
+		end := i + chunkRunes
+		if end > len(runes) {
+			end = len(runes)
+		}
+		onToken(string(runes[i:end]))
+		if end < len(runes) {
+			time.Sleep(delay)
+		}
 	}
-	return s[:n]
 }
 
 // filterEnv 从 env 中移除 key 等于 remove 列表中任意一项的条目（忽略值）。
