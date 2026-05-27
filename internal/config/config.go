@@ -69,15 +69,15 @@ func Load() (*Config, error) {
 	}
 
 	var missing []string
-	if cfg.GitLabURL == "" {
-		missing = append(missing, "GITLAB_URL")
-	}
-	if cfg.GitLabToken == "" {
-		missing = append(missing, "GITLAB_TOKEN")
-	}
-	if cfg.WebhookSecret == "" {
-		missing = append(missing, "WEBHOOK_SECRET")
-	}
+	//if cfg.GitLabURL == "" {
+	//	missing = append(missing, "GITLAB_URL")
+	//}
+	//if cfg.GitLabToken == "" {
+	//	missing = append(missing, "GITLAB_TOKEN")
+	//}
+	//if cfg.WebhookSecret == "" {
+	//	missing = append(missing, "WEBHOOK_SECRET")
+	//}
 	// OPENAI_API_KEY 仅在使用 openai 后端时必填
 	if cfg.AIBackend != "claude-cli" && cfg.OpenAIAPIKey == "" {
 		missing = append(missing, "OPENAI_API_KEY")
