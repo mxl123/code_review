@@ -13,8 +13,8 @@ import (
 
 // Runner 是 reviewer.Reviewer 的接口抽象，方便测试。
 type Runner interface {
-	RunReview(gl gitlab.GitLabClient, projectID, mrIID int) (string, error)
-	RunReviewStream(gl gitlab.GitLabClient, projectID, mrIID int, onToken func(string)) error
+	RunReview(gl gitlab.GitLabClient, projectID, mrIID int, diff string) (string, error)
+	RunReviewStream(gl gitlab.GitLabClient, projectID, mrIID int, diff string, onToken func(string)) error
 }
 
 type Handler struct {
@@ -69,6 +69,7 @@ type triggerRequest struct {
 	ProjectID   int    `json:"project_id"`
 	MRIID       int    `json:"mr_iid"`
 	GitLabToken string `json:"gitlab_token"` // 可选，用用户自己的 read_api token
+	Diff        string `json:"diff"`         // 可选：插件预取的 diff；设置后跳过服务端 GitLab 拉取
 }
 
 func (h *Handler) triggerReview(w http.ResponseWriter, r *http.Request) {
@@ -82,8 +83,8 @@ func (h *Handler) triggerReview(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "请求体 JSON 解析失败", http.StatusBadRequest)
 		return
 	}
-	if req.ProjectID == 0 || req.MRIID == 0 {
-		jsonError(w, "project_id 和 mr_iid 不能为空", http.StatusBadRequest)
+	if req.Diff == "" && (req.ProjectID == 0 || req.MRIID == 0) {
+		jsonError(w, "需提供 diff，或同时提供 project_id 和 mr_iid", http.StatusBadRequest)
 		return
 	}
 
@@ -99,7 +100,7 @@ func (h *Handler) triggerReview(w http.ResponseWriter, r *http.Request) {
 	log.Printf("api: 触发审查 job=%s project=%d mr=%d", job.ID, req.ProjectID, req.MRIID)
 
 	go func() {
-		result, err := h.runner.RunReview(gl, req.ProjectID, req.MRIID)
+		result, err := h.runner.RunReview(gl, req.ProjectID, req.MRIID, req.Diff)
 		if err != nil {
 			log.Printf("api: 审查失败 job=%s: %v", job.ID, err)
 			h.store.SetFailed(job.ID, err.Error())
@@ -188,8 +189,8 @@ func (h *Handler) triggerStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
-	if req.ProjectID == 0 || req.MRIID == 0 {
-		http.Error(w, "project_id 和 mr_iid 不能为空", http.StatusBadRequest)
+	if req.Diff == "" && (req.ProjectID == 0 || req.MRIID == 0) {
+		http.Error(w, "需提供 diff，或同时提供 project_id 和 mr_iid", http.StatusBadRequest)
 		return
 	}
 
@@ -217,7 +218,7 @@ func (h *Handler) triggerStream(w http.ResponseWriter, r *http.Request) {
 	sendSSE(w, flusher, "open", "")
 
 	var resultBuf strings.Builder
-	err := h.runner.RunReviewStream(gl, req.ProjectID, req.MRIID, func(chunk string) {
+	err := h.runner.RunReviewStream(gl, req.ProjectID, req.MRIID, req.Diff, func(chunk string) {
 		resultBuf.WriteString(chunk)
 		sendSSE(w, flusher, "token", chunk)
 	})

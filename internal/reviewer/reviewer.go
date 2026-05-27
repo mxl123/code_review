@@ -75,13 +75,19 @@ func (r *Reviewer) Process(projectID, mrIID int) {
 
 // RunReview 获取 MR diff 并返回审查结果，不发布到 GitLab，供主动触发 API 使用。
 // gl 参数允许传入使用用户自己 token 的临时客户端。
-func (r *Reviewer) RunReview(gl gitlab.GitLabClient, projectID, mrIID int) (string, error) {
-	changes, err := gl.GetMRChanges(projectID, mrIID)
-	if err != nil {
-		return "", fmt.Errorf("获取 MR 变更失败: %w", err)
+// 若 diff 非空则直接使用，跳过 GitLab API 拉取。
+func (r *Reviewer) RunReview(gl gitlab.GitLabClient, projectID, mrIID int, diff string) (string, error) {
+	var truncated bool
+	if diff == "" {
+		changes, err := gl.GetMRChanges(projectID, mrIID)
+		if err != nil {
+			return "", fmt.Errorf("获取 MR 变更失败: %w", err)
+		}
+		diff, truncated = buildDiff(changes.Changes, r.maxDiffBytes)
+	} else if len(diff) > r.maxDiffBytes {
+		diff = diff[:r.maxDiffBytes]
+		truncated = true
 	}
-
-	diff, truncated := buildDiff(changes.Changes, r.maxDiffBytes)
 	if strings.TrimSpace(diff) == "" {
 		return "", fmt.Errorf("没有可审查的代码变更（可能全是删除操作）")
 	}
@@ -106,13 +112,19 @@ func (r *Reviewer) RunReview(gl gitlab.GitLabClient, projectID, mrIID int) (stri
 
 
 // RunReviewStream 流式执行审查，每收到一个 token 就调用 onToken，供 SSE 接口使用。
-func (r *Reviewer) RunReviewStream(gl gitlab.GitLabClient, projectID, mrIID int, onToken func(string)) error {
-	changes, err := gl.GetMRChanges(projectID, mrIID)
-	if err != nil {
-		return fmt.Errorf("获取 MR 变更失败: %w", err)
+// 若 diff 非空则直接使用，跳过 GitLab API 拉取。
+func (r *Reviewer) RunReviewStream(gl gitlab.GitLabClient, projectID, mrIID int, diff string, onToken func(string)) error {
+	var truncated bool
+	if diff == "" {
+		changes, err := gl.GetMRChanges(projectID, mrIID)
+		if err != nil {
+			return fmt.Errorf("获取 MR 变更失败: %w", err)
+		}
+		diff, truncated = buildDiff(changes.Changes, r.maxDiffBytes)
+	} else if len(diff) > r.maxDiffBytes {
+		diff = diff[:r.maxDiffBytes]
+		truncated = true
 	}
-
-	diff, truncated := buildDiff(changes.Changes, r.maxDiffBytes)
 	if strings.TrimSpace(diff) == "" {
 		return fmt.Errorf("没有可审查的代码变更（可能全是删除操作）")
 	}

@@ -73,8 +73,31 @@ function bgStream(url, headers = {}, body) {
   });
 }
 
+// fetchDiff 直接在 GitLab 页面同源 fetch，自动带上用户登录 Cookie，无需额外 token。
+async function fetchDiff(projectId, mrIID) {
+  const resp = await fetch(
+    `/api/v4/projects/${projectId}/merge_requests/${mrIID}/changes`
+  );
+  if (!resp.ok) throw new Error(`GitLab API 返回 ${resp.status}`);
+  const data = await resp.json();
+  return formatChanges(data.changes || []);
+}
+
+function formatChanges(changes) {
+  const MAX_BYTES = 200 * 1024;
+  let result = '';
+  for (const c of changes) {
+    if (c.deleted_file) continue;
+    const path = c.new_path || c.old_path;
+    const block = `--- File: ${path} ---\n${c.diff}\n\n`;
+    if (result.length + block.length > MAX_BYTES) break;
+    result += block;
+  }
+  return result;
+}
+
 async function startReview({ projectId, mrIID }) {
-  const data = await chrome.storage.sync.get(['serviceUrl', 'apiKey', 'gitlabToken']);
+  const data = await chrome.storage.sync.get(['serviceUrl', 'apiKey']);
   const cfg = { ...data, serviceUrl: data.serviceUrl || 'http://10.20.21.119:8082' };
 
   if (!cfg.serviceUrl) {
@@ -84,16 +107,28 @@ async function startReview({ projectId, mrIID }) {
 
   const btn = document.getElementById('cr-review-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ 审查中...'; }
+  showPanel('正在获取代码差异...', false);
+
+  let diff;
+  try {
+    diff = await fetchDiff(projectId, mrIID);
+  } catch (e) {
+    showPanel(`❌ 获取代码差异失败：${e.message}`, true);
+    resetBtn();
+    return;
+  }
+  if (!diff.trim()) {
+    showPanel('ℹ️ 没有可审查的代码变更。', true);
+    resetBtn();
+    return;
+  }
+
   showPanel('正在连接审查服务，请稍候...', false);
 
   const headers = { 'Content-Type': 'application/json' };
   if (cfg.apiKey) headers['X-API-Key'] = cfg.apiKey;
 
-  const body = JSON.stringify({
-    project_id: projectId,
-    mr_iid: mrIID,
-    gitlab_token: cfg.gitlabToken || undefined,
-  });
+  const body = JSON.stringify({ diff });
 
   // 注册流式消息监听器（在发起请求前注册，避免遗漏首批 chunk）
   let streamBuf = '';
